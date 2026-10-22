@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}CMI{% endblock %} · CMI</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='fiori.css') }}">
+<script src="{{ url_for('static', filename='cmi.js') }}" defer></script>
+</head>
+<body>
+<header class="shell">
+  <a class="logo" href="{{ url_for('home') }}"><b>CMI</b><span>Change Management Interface</span></a>
+  <span class="shell-title">{% block shell %}{% endblock %}</span>
+</header>
+{% if g.user %}
+<div class="subbar">
+  <span class="user">{{ g.user.name }}</span>
+  {% if g.user.is_core %}<a href="{{ url_for('account') }}">Password</a>{% endif %}
+  <a href="{{ url_for('logout') }}">LogOff</a>
+</div>
+{% endif %}
+{% with msgs = get_flashed_messages(with_categories=true) %}{% if msgs %}
+<div class="messages">{% for cat, m in msgs %}<div class="msg {{ cat }}" role="status">{{ m }}</div>{% endfor %}</div>
+{% endif %}{% endwith %}
+{% block body %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ u.name or 'New User' }}{% endblock %}
+{% block shell %}Administration{% endblock %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  <form class="panel pad narrow" method="post">
+    <h1 class="title">{{ u.name if u.id else 'New Core User' }}</h1>
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <div class="field"><label for="name" class="req">Name</label><input id="name" name="name" value="{{ u.name or '' }}" maxlength="120" required></div>
+    <div class="field"><label for="email" class="req">Email</label>
+      <input id="email" name="email" type="email" value="{{ u.email or '' }}" {% if u.id %}disabled{% else %}required{% endif %}></div>
+    <div class="field">
+      <label class="check"><input type="checkbox" name="is_core" {% if u.is_core %}checked{% endif %}> Core user (signs in with a password)</label>
+      {% if u.id %}<label class="check"><input type="checkbox" name="active" {% if u.active %}checked{% endif %}> Active (can sign in)</label>{% endif %}
+      {% if u.locked_until %}<label class="check"><input type="checkbox" name="unlock"> Unlock (locked after failed sign-ins)</label>{% endif %}
+    </div>
+    <div class="field"><label for="password">{{ 'Reset password' if u.id else 'Password' }} (leave blank to {{ 'keep' if u.password_hash else 'generate one' }})</label>
+      <input id="password" name="password" type="password" minlength="10" autocomplete="new-password"></div>
+    <fieldset class="field">
+      <legend>Permission profiles</legend>
+      {% for p in profiles %}
+      <label class="check"><input type="checkbox" name="profiles" value="{{ p.id }}" {% if p in u.profiles %}checked{% endif %}>
+        {{ p.name }} <span class="muted small">({{ p.permissions|join(', ') or 'no permissions' }})</span></label>
+      {% endfor %}
+    </fieldset>
+    <div class="actions">
+      <a class="btn transparent" href="{{ url_for('admin.users') }}">Cancel</a>
+      <button class="btn emph" type="submit">Save</button>
+    </div>
+  </form>
+</main>
+{% endblock %}

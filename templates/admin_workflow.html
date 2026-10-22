@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Workflow · {{ form.name }}{% endblock %}
+{% block shell %}Workflow Settings{% endblock %}
+{% macro stage(s) %}
+<div class="row panel builder-row">
+  <div class="builder-grid">
+    <div><label>Stage name</label><input name="s_name" value="{{ s.name }}" maxlength="120"></div>
+    <div><label>Needs</label><select name="s_mode"><option value="any">One approver</option><option value="all" {% if s.mode == 'all' %}selected{% endif %}>All approvers</option></select></div>
+    <div class="wide"><label>Approver emails (comma separated)</label><input name="s_approvers" value="{% for a in s.approvers %}{{ names.get(a, '') }}{{ ', ' if not loop.last }}{% endfor %}" list="approver-emails"></div>
+    <div><label>Only when field</label><select name="s_cond_field"><option value="">Always</option>
+      {% for fid, f in schema_fields.items() %}<option value="{{ fid }}" {% if s.condition and s.condition.field == fid %}selected{% endif %}>{{ f.label }}</option>{% endfor %}</select></div>
+    <div><label>…has value</label><input name="s_cond_value" value="{{ s.condition.equals if s.condition else '' }}"></div>
+  </div>
+  <div class="row-actions">
+    <button class="btn transparent" data-act="up" aria-label="Move up">↑</button>
+    <button class="btn transparent" data-act="down" aria-label="Move down">↓</button>
+    <button class="btn transparent reject" data-act="del">Remove</button>
+  </div>
+</div>
+{% endmacro %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  <h1 class="title">{{ form.name }} · Workflow</h1>
+  <p class="subtitle">Stages run in order. Each stage needs one or all of its approvers. A stage with a condition only applies when the request's field has that value. <a href="{{ url_for('admin.form_edit', fid=form.id) }}">Edit form fields</a></p>
+
+  <form method="post" data-rows>
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <div class="panel pad inline-form">
+      <div><label for="da">Default assignee for new requests</label>
+        <select id="da" name="default_assignee_id"><option value="">None</option>
+          {% for u in core_users %}<option value="{{ u.id }}" {% if u.id == form.default_assignee_id %}selected{% endif %}>{{ u.name }}</option>{% endfor %}</select></div>
+    </div>
+    <h2 class="section-title">Approval Stages</h2>
+    <div class="rows">{% for s in stages %}{{ stage(s) }}{% endfor %}</div>
+    <template>{{ stage({'approvers': [], 'mode': 'any'}) }}</template>
+    <datalist id="approver-emails">{% for u in approvers %}<option value="{{ u.email }}">{{ u.name }}</option>{% endfor %}</datalist>
+    <p class="hint">Users with approval permission: {% for u in approvers %}{{ u.name }} ({{ u.email }}){{ ', ' if not loop.last }}{% else %}none — give someone the Approver profile first{% endfor %}.</p>
+    <div class="actions">
+      <button class="btn" data-act="add">Add Stage</button>
+      <span class="grow"></span>
+      <button class="btn emph" type="submit">Save Workflow</button>
+    </div>
+  </form>
+</main>
+{% endblock %}

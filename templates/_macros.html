@@ -1,0 +1,48 @@
+{% macro status(s) %}<span class="status {{ STATUS_CLASS.get(s, 'neutral') }}">{{ s }}</span>{% endmacro %}
+
+{% macro priority(p) %}{% if p %}<span class="status {{ PRIORITY_CLASS[p] }}">{{ p }}</span>{% else %}<span class="muted">Not set</span>{% endif %}{% endmacro %}
+
+{% macro cond_attrs(f) %}{% if f.show_if %} data-show-field="{{ f.show_if.field }}" data-show-value="{{ f.show_if.equals }}"{% endif %}{% endmacro %}
+
+{# Renders a form schema. data: MultiDict of submitted or stored values. existing/attachments: kept files when editing. #}
+{% macro form_fields(schema, data, errors, existing={}, attachments={}) %}
+{% for f in schema.fields %}
+  {% if f.type == 'section' %}
+  <h3 class="form-section"{{ cond_attrs(f) }}>{{ f.label }}</h3>
+  {% else %}
+  {% set err = errors.get(f.id) %}
+  <div class="field"{{ cond_attrs(f) }}>
+    {% if f.type == 'checkbox' %}
+    <label class="check"><input type="checkbox" name="{{ f.id }}" value="yes" {% if 'yes' in data.getlist(f.id) %}checked{% endif %}>
+      <span {% if f.required %}class="req"{% endif %}>{{ f.label }}</span></label>
+    {% else %}
+    <label for="f-{{ f.id }}" {% if f.required %}class="req"{% endif %}>{{ f.label }}</label>
+    {% if f.type == 'textarea' %}
+    <textarea id="f-{{ f.id }}" name="{{ f.id }}" rows="4" maxlength="{{ f.max_length or 4000 }}" {% if err %}aria-invalid="true"{% endif %} {% if f.required %}required{% endif %}>{{ data.get(f.id, '') }}</textarea>
+    {% elif f.type == 'multi_select' %}
+    <div class="checks" id="f-{{ f.id }}" role="group">
+      {% for o in f.options %}<label class="check"><input type="checkbox" name="{{ f.id }}" value="{{ o }}" {% if o in data.getlist(f.id) %}checked{% endif %}> {{ o }}</label>{% endfor %}
+    </div>
+    {% elif f.type == 'select' %}
+    <select id="f-{{ f.id }}" name="{{ f.id }}" {% if err %}aria-invalid="true"{% endif %} {% if f.required %}required{% endif %}>
+      <option value="">Select…</option>
+      {% for o in f.options %}<option {% if o == data.get(f.id) %}selected{% endif %}>{{ o }}</option>{% endfor %}
+    </select>
+    {% elif f.type in ('file', 'image') %}
+    {% set accept = f.accept or (['png', 'jpg', 'jpeg', 'webp'] if f.type == 'image' else []) %}
+    {% for aid in existing.get(f.id, []) %}{% if attachments[aid] %}<div class="hint">Attached: {{ attachments[aid].filename }}</div>{% endif %}{% endfor %}
+    <input id="f-{{ f.id }}" name="{{ f.id }}" type="file" multiple {% if accept %}accept="{% for e in accept %}.{{ e }}{{ ',' if not loop.last }}{% endfor %}"{% endif %} {% if err %}aria-invalid="true"{% endif %}>
+    <div class="hint">{{ (accept or ['pdf, images, office files, txt, csv, zip'])|join(', ') }} · up to {{ f.max_mb or 10 }} MB each, {{ f.max_count or 5 }} files</div>
+    {% else %}
+    <input id="f-{{ f.id }}" name="{{ f.id }}" value="{{ data.get(f.id, '') }}" {% if err %}aria-invalid="true"{% endif %} {% if f.required %}required{% endif %}
+      type="{{ {'number': 'number', 'date': 'date', 'datetime': 'datetime-local'}.get(f.type, 'text') }}"
+      {% if f.type == 'number' %}step="any"{% endif %}
+      {% if f.min is defined %}min="{{ f.min }}"{% endif %} {% if f.max is defined %}max="{{ f.max }}"{% endif %}
+      {% if f.max_length %}maxlength="{{ f.max_length }}"{% endif %}>
+    {% endif %}
+    {% endif %}
+    {% if err %}<div class="field-error">{{ err }}</div>{% endif %}
+  </div>
+  {% endif %}
+{% endfor %}
+{% endmacro %}

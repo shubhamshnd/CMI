@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Forms{% endblock %}
+{% block shell %}Administration{% endblock %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  <div class="panel table-wrap">
+    <div class="table-toolbar"><h3>Forms ({{ forms|length }})</h3></div>
+    <table>
+      <thead><tr><th>Form</th><th>Published</th><th>Approval stages</th><th>Tickets</th><th></th></tr></thead>
+      <tbody>
+        {% for f in forms %}
+        <tr>
+          <td><a href="{{ url_for('admin.form_edit', fid=f.id) }}">{{ f.name }}</a><span class="sub">{{ f.key }}{% if f.archived %} · archived{% endif %}</span></td>
+          <td>{{ 'v' ~ f.latest.version if f.latest else 'Not published' }}{% if f.latest and f.has_unpublished_changes %}<span class="sub status critical">Unpublished changes</span>{% endif %}</td>
+          <td><a href="{{ url_for('admin.form_workflow', fid=f.id) }}">{{ f.workflow|length }} stage(s)</a></td>
+          <td>{{ usage[f.id] }}</td>
+          <td class="right">
+            <form method="post" action="{{ url_for('admin.form_duplicate', fid=f.id) }}" class="inline">
+              <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn transparent" type="submit">Duplicate</button></form>
+            <form method="post" action="{{ url_for('admin.form_archive', fid=f.id) }}" class="inline">
+              <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn transparent" type="submit">{{ 'Restore' if f.archived else 'Archive' }}</button></form>
+          </td>
+        </tr>
+        {% else %}<tr><td colspan="5" class="empty">No forms yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <form class="panel pad inline-form spaced" method="post" action="{{ url_for('admin.form_new') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <div><label for="key" class="req">Key</label><input id="key" name="key" placeholder="ACCESS_CHANGE" maxlength="60" required></div>
+    <div><label for="name" class="req">Name</label><input id="name" name="name" maxlength="120" required></div>
+    <div class="grow"><label for="description">Description</label><input id="description" name="description" maxlength="255"></div>
+    <button class="btn emph" type="submit">New Form</button>
+  </form>
+</main>
+{% endblock %}

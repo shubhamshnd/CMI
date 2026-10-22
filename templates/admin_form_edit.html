@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ form.name }}{% endblock %}
+{% block shell %}Form Builder{% endblock %}
+{% macro row(f) %}
+<div class="row panel builder-row">
+  <div class="builder-grid">
+    <div><label>Label</label><input name="f_label" value="{{ f.label }}" maxlength="120"></div>
+    <div><label>ID</label><input name="f_id" value="{{ f.id }}" maxlength="40" placeholder="lower_case_id"></div>
+    <div><label>Type</label><select name="f_type">{% for ty in ['text', 'textarea', 'select', 'multi_select', 'date', 'datetime', 'number', 'checkbox', 'file', 'image', 'section'] %}<option {% if ty == f.type %}selected{% endif %}>{{ ty }}</option>{% endfor %}</select></div>
+    <div><label>Required</label><select name="f_required"><option value="no">No</option><option value="yes" {% if f.required %}selected{% endif %}>Yes</option></select></div>
+    <div><label title="Changing this field after approval restarts approval">Material</label><select name="f_material"><option value="no">No</option><option value="yes" {% if f.material %}selected{% endif %}>Yes</option></select></div>
+    <div class="wide" data-for="select multi_select"><label>Options (comma separated)</label><input name="f_options" value="{{ (f.options or [])|join(', ') }}"></div>
+    <div data-for="number"><label>Min</label><input name="f_min" value="{{ f.min if f.min is defined else '' }}"></div>
+    <div data-for="number"><label>Max</label><input name="f_max" value="{{ f.max if f.max is defined else '' }}"></div>
+    <div data-for="text textarea"><label>Max length</label><input name="f_max_length" value="{{ f.max_length or '' }}"></div>
+    <div data-for="file image"><label>File types (e.g. pdf, png)</label><input name="f_accept" value="{{ (f.accept or [])|join(', ') }}"></div>
+    <div data-for="file image"><label>Max MB per file</label><input name="f_max_mb" value="{{ f.max_mb or '' }}"></div>
+    <div data-for="file image"><label>Max files</label><input name="f_max_count" value="{{ f.max_count or '' }}"></div>
+    <div><label>Show when field ID…</label><input name="f_show_field" value="{{ f.show_if.field if f.show_if else '' }}"></div>
+    <div><label>…has value</label><input name="f_show_value" value="{{ f.show_if.equals if f.show_if else '' }}"></div>
+  </div>
+  <div class="row-actions">
+    <button class="btn transparent" data-act="up" title="Move up" aria-label="Move up">↑</button>
+    <button class="btn transparent" data-act="down" title="Move down" aria-label="Move down">↓</button>
+    <button class="btn transparent reject" data-act="del">Remove</button>
+  </div>
+</div>
+{% endmacro %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  <h1 class="title">{{ form.name }} <span class="muted">· {{ form.key }}</span></h1>
+  <p class="subtitle">
+    {% if form.latest %}Published v{{ form.latest.version }}{% if form.has_unpublished_changes %} · <span class="status critical">draft has unpublished changes</span>{% endif %}{% else %}Not published yet{% endif %}
+    · <a href="{{ url_for('admin.form_workflow', fid=form.id) }}">Approval workflow</a>
+  </p>
+
+  <form method="post" data-rows>
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <div class="panel pad inline-form">
+      <div><label for="name" class="req">Name</label><input id="name" name="name" value="{{ name }}" maxlength="120" required></div>
+      <div class="grow"><label for="description">Description</label><input id="description" name="description" value="{{ form.description }}" maxlength="255"></div>
+    </div>
+    <p class="hint">Every request also has a Title. Fields keep their ID across versions; changing an ID creates a new field.</p>
+    <div class="rows">{% for f in fields %}{{ row(f) }}{% endfor %}</div>
+    <template>{{ row({'type': 'text'}) }}</template>
+    <div class="actions">
+      <button class="btn" data-act="add">Add Field</button>
+      <span class="grow"></span>
+      <button class="btn" name="action" value="save" type="submit">Save Draft</button>
+      <button class="btn" name="action" value="preview" type="submit">Save &amp; Preview</button>
+      <button class="btn emph" name="action" value="publish" type="submit">Publish</button>
+    </div>
+  </form>
+
+  <section class="section">
+    <h2>Version History</h2>
+    <div class="panel table-wrap">
+      <table>
+        <thead><tr><th>Version</th><th>Published</th><th>By</th><th>Fields</th><th></th></tr></thead>
+        <tbody>
+          {% for v in form.versions|reverse %}
+          <tr><td>v{{ v.version }}</td><td>{{ v.published_at|dt }}</td><td>{{ v.published_by.name if v.published_by else '—' }}</td>
+            <td>{{ v.schema.fields|length }}</td><td class="right"><a href="{{ url_for('admin.form_preview', fid=form.id, version=v.version) }}">Preview</a></td></tr>
+          {% else %}<tr><td colspan="5" class="empty">Not published yet.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+{% endblock %}

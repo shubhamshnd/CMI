@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ p.name }}{% endblock %}
+{% block shell %}Administration{% endblock %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  <form class="panel pad narrow" method="post">
+    <h1 class="title">{{ p.name }}</h1>
+    <p class="subtitle">Used by {{ p.users|length }} user(s). Changes apply immediately.</p>
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <div class="field"><label for="name" class="req">Name</label><input id="name" name="name" value="{{ p.name }}" maxlength="80" required></div>
+    <fieldset class="field">
+      <legend>Permissions</legend>
+      {% for key, label in PERMISSIONS.items() %}
+      <label class="check"><input type="checkbox" name="permissions" value="{{ key }}" {% if key in p.permissions %}checked{% endif %}>
+        {{ label }} <code class="muted small">{{ key }}</code></label>
+      {% endfor %}
+    </fieldset>
+    <div class="actions">
+      <button class="btn transparent reject" name="action" value="delete" type="submit" {% if p.users %}disabled title="Remove it from all users first"{% endif %}>Delete</button>
+      <span class="grow"></span>
+      <a class="btn transparent" href="{{ url_for('admin.profiles') }}">Cancel</a>
+      <button class="btn emph" name="action" value="save" type="submit">Save</button>
+    </div>
+  </form>
+</main>
+{% endblock %}

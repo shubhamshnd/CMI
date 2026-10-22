@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block shell %}CMI Home{% endblock %}
+{% macro group(title, text) %}
+<section class="group">
+  <div class="group-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <div><h2>{{ title }}</h2><p>{{ text }}</p><div class="ql">Quick Links</div><ul>{{ caller() }}</ul></div>
+</section>
+{% endmacro %}
+{% block body %}
+<main class="page">
+  <div class="launchpad">
+    {% if g.user.can('ticket.create') %}
+    {% call group('Change Request Creation', 'Create change requests from published forms') %}
+      <li><a href="{{ url_for('ticket_new') }}">Form Catalogue</a></li>
+      {% for f in forms %}<li><a href="{{ url_for('ticket_new', form=f.key) }}">{{ f.name }}</a></li>{% endfor %}
+    {% endcall %}
+    {% endif %}
+
+    {% call group('My Work', 'Your requests, assignments, priority requests and approvals') %}
+      <li><a href="{{ url_for('tickets', tab='mine') }}">My Tickets</a><span class="count">({{ counts.mine }})</span></li>
+      <li><a href="{{ url_for('tickets', tab='assigned') }}">Assigned to Me</a><span class="count">({{ counts.assigned }})</span></li>
+      <li><a href="{{ url_for('tickets', tab='priority') }}">Priority Requests</a><span class="count">({{ counts.priority }})</span></li>
+      <li><a href="{{ url_for('tickets', tab='approvals') }}">Pending My Approval</a><span class="count">({{ counts.approvals }})</span></li>
+      {% if counts.all is not none %}<li><a href="{{ url_for('tickets', tab='all') }}">All Tickets</a><span class="count">({{ counts.all }})</span></li>{% endif %}
+    {% endcall %}
+
+    {% if g.user.can('form.publish') or g.user.can('user.manage') %}
+    {% call group('Administration', 'Configure forms, workflows, users and permission profiles') %}
+      {% if g.user.can('form.publish') %}<li><a href="{{ url_for('admin.forms') }}">Forms &amp; Workflows</a></li>{% endif %}
+      {% if g.user.can('user.manage') %}
+      <li><a href="{{ url_for('admin.users') }}">Users</a></li>
+      <li><a href="{{ url_for('admin.profiles') }}">Permission Profiles</a></li>
+      {% endif %}
+    {% endcall %}
+    {% endif %}
+
+    {% if g.user.can('report.view') %}
+    {% call group('Reports', 'Queue health, overdue work and approval times') %}
+      <li><a href="{{ url_for('admin.reports') }}">Dashboard</a></li>
+      <li><a href="{{ url_for('tickets', tab='all', overdue=1) }}">Overdue Tickets</a></li>
+      <li><a href="{{ url_for('tickets', tab='all', export='csv') }}">Export All (CSV)</a></li>
+    {% endcall %}
+    {% endif %}
+  </div>
+</main>
+{% endblock %}

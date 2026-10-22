@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+{% block shell %}Reports{% endblock %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  <div class="kpis">
+    {% for label, value, href in kpis %}
+    <div class="panel kpi">{% if href %}<a href="{{ href }}">{% endif %}<span class="kpi-value">{{ value }}</span><span class="kpi-label">{{ label }}</span>{% if href %}</a>{% endif %}</div>
+    {% endfor %}
+    {% for label, value in times.items() %}
+    <div class="panel kpi"><span class="kpi-value">{{ value }}</span><span class="kpi-label">{{ label }}</span></div>
+    {% endfor %}
+  </div>
+  <div class="work-grid spaced">
+    {% for title, counter in groups.items() %}
+    <div class="panel table-wrap">
+      <div class="table-toolbar"><h3>{{ title }}</h3></div>
+      <table>
+        <tbody>
+          {% for name, n in counter.most_common() %}<tr><td>{{ name }}</td><td class="right">{{ n }}</td></tr>
+          {% else %}<tr><td class="empty">Nothing yet.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="spaced"><a class="btn" href="{{ url_for('tickets', tab='all', export='csv') }}">Export All Tickets (CSV)</a></p>
+</main>
+{% endblock %}

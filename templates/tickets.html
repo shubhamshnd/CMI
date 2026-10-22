@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status, priority %}
+{% block title %}Change Requests{% endblock %}
+{% block shell %}Change Requests{% endblock %}
+{% block body %}
+<main class="page">
+  <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> / Change Requests</div>
+
+  <form class="panel filterbar" method="get">
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <div><label for="q">Search</label><input id="q" name="q" type="search" value="{{ request.args.q }}" placeholder="CHG-0001 or title"></div>
+    <div><label for="st">Status</label>
+      <select id="st" name="status"><option value="">All</option>
+        {% for s in STATUSES %}<option {% if request.args.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+    <div><label for="pr">Priority</label>
+      <select id="pr" name="priority"><option value="">All</option>
+        {% for p in PRIORITIES + ['Not set'] %}<option {% if request.args.priority == p %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+    <div><label for="fm">Form</label>
+      <select id="fm" name="form"><option value="">All</option>
+        {% for f in forms %}<option value="{{ f.key }}" {% if request.args.form == f.key %}selected{% endif %}>{{ f.name }}</option>{% endfor %}</select></div>
+    <label class="check"><input type="checkbox" name="overdue" value="1" {% if request.args.overdue %}checked{% endif %}> Overdue only</label>
+    <button class="btn emph" type="submit">Go</button>
+  </form>
+
+  <div class="panel">
+    <nav class="tabs">
+      {% for key, label in tabs.items() %}
+      <a href="{{ url_for('tickets', tab=key) }}" {% if key == tab %}aria-current="page"{% endif %}>{{ label }}<span class="n">{{ counts[key] }}</span></a>
+      {% endfor %}
+    </nav>
+    <div class="table-toolbar">
+      <h3>Requests ({{ rows|length }})</h3>
+      <div class="actions">
+        <a class="btn transparent" href="{{ url_for('tickets', export='csv', **request.args.to_dict()) }}">Export CSV</a>
+        {% if g.user.can('ticket.create') %}<a class="btn" href="{{ url_for('ticket_new') }}">Create</a>{% endif %}
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Request</th><th>Form</th><th>Status</th><th>Priority</th><th>Assignee</th><th>Due Date</th></tr></thead>
+        <tbody>
+          {% for t in rows %}
+          <tr>
+            <td><a href="{{ url_for('ticket_detail', tid=t.id) }}">{{ t.number }}</a><span class="sub">{{ t.title }}</span></td>
+            <td>{{ t.form_version.form.name }}<span class="sub">v{{ t.form_version.version }}</span></td>
+            <td>{{ status(t.status) }}</td>
+            <td>{{ priority(t.priority) }}{% if not t.priority and t.open_priority_requests %}<span class="sub">Requested</span>{% endif %}</td>
+            <td>{{ t.assignee.name if t.assignee else 'Unassigned' }}</td>
+            <td>{{ t.due_date|d }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="empty">No requests found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+{% endblock %}

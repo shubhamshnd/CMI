@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ e.name }}{% endblock %}
+{% block shell %}{{ e.name }}{% endblock %}
+{% block body %}
+<main class="page">
+  <div class="panel pad narrow">
+    <h1 class="title">{{ e.code }} · {{ e.name }}</h1>
+    <p>{% if e.code == 403 %}You do not have permission to do this. Ask a CMI administrator if you need access.{% else %}{{ e.description }}{% endif %}</p>
+    <a href="{{ url_for('home') }}">Go to home</a>
+  </div>
+</main>
+{% endblock %}

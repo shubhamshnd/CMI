@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Permission Profiles{% endblock %}
+{% block shell %}Administration{% endblock %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  <div class="panel table-wrap">
+    <table>
+      <thead><tr><th>Profile</th><th>Permissions</th><th>Users</th></tr></thead>
+      <tbody>
+        {% for p in profiles %}
+        <tr><td><a href="{{ url_for('admin.profile_edit', pid=p.id) }}">{{ p.name }}</a></td>
+          <td>{{ p.permissions|join(', ') or '—' }}</td><td>{{ p.users|length }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <form class="panel pad inline-form spaced" method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <div><label for="name" class="req">New profile name</label><input id="name" name="name" maxlength="80" required></div>
+    <button class="btn emph" type="submit">Create Profile</button>
+  </form>
+</main>
+{% endblock %}

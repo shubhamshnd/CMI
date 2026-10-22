@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "_macros.html" import form_fields %}
+{% block title %}{{ 'Edit ' ~ editing.number if editing else 'Create Request' }}{% endblock %}
+{% block shell %}{{ 'Edit Request' if editing else 'Create Request' }}{% endblock %}
+{% block body %}
+<main class="page">
+  {% if not fv %}
+  <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> / Form Catalogue</div>
+  <h1 class="title">Form Catalogue</h1>
+  <p class="subtitle">Choose the type of change you want to request.</p>
+  <div class="panel table-wrap">
+    <table>
+      <thead><tr><th>Form</th><th>Description</th><th>Version</th></tr></thead>
+      <tbody>
+        {% for f in forms %}
+        <tr><td><a href="{{ url_for('ticket_new', form=f.key) }}">{{ f.name }}</a></td><td>{{ f.description }}</td><td>v{{ f.latest.version }}</td></tr>
+        {% else %}<tr><td colspan="3" class="empty">No published forms yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% else %}
+  <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> /
+    {% if editing %}<a href="{{ url_for('ticket_detail', tid=editing.id) }}">{{ editing.number }}</a> / Edit
+    {% else %}<a href="{{ url_for('ticket_new') }}">Form Catalogue</a> / {{ form.name }}{% endif %}</div>
+  <h1 class="title">{{ 'Edit ' ~ editing.number if editing else form.name }}</h1>
+  <p class="subtitle">{{ form.name }} · version {{ fv.version }}
+    {% if source %} · {{ LINK_KINDS[kind][0] if kind else 'Copied from' }} <a href="{{ url_for('ticket_detail', tid=source.id) }}">{{ source.number }}</a>; fields with the same name were carried forward{% endif %}</p>
+  {% if editing and editing.status in ('Pending Approval', 'Approved') %}
+  <div class="msg warning">Changing a field marked as material restarts approval.</div>
+  {% endif %}
+  <form class="panel pad narrow" method="post" enctype="multipart/form-data" data-dynamic>
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    {% if editing %}<input type="hidden" name="rv" value="{{ editing.row_version }}">{% endif %}
+    <div class="field">
+      <label for="title" class="req">Title</label>
+      <input id="title" name="title" maxlength="200" value="{{ data.get('title', '') }}" required {% if errors.title %}aria-invalid="true"{% endif %}>
+      {% if errors.title %}<div class="field-error">{{ errors.title }}</div>{% endif %}
+    </div>
+    {{ form_fields(fv.schema, data, errors, editing.values if editing else {}, attachments or {}) }}
+    {% if editing %}
+    <div class="field"><label for="reason">Reason for change</label><input id="reason" name="reason" maxlength="1000"></div>
+    {% endif %}
+    <div class="actions">
+      <a class="btn transparent" href="{{ url_for('ticket_detail', tid=editing.id) if editing else url_for('ticket_new') }}">Cancel</a>
+      <button class="btn emph" type="submit">{{ 'Save' if editing else 'Submit' }}</button>
+    </div>
+  </form>
+  {% endif %}
+</main>
+{% endblock %}

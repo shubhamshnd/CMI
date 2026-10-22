@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status, priority %}
+{% block title %}{{ t.number }}{% endblock %}
+{% block shell %}Change Request{% endblock %}
+{% block body %}
+{% set can_assign = g.user.can('ticket.assign') %}
+{% set can_edit = g.user.can('ticket.edit') %}
+{% set can_link = g.user.can('ticket.link') %}
+{% set show_work = can_assign or can_set_priority or can_edit or can_submit %}
+<div class="obj-header">
+  <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> / <a href="{{ url_for('tickets') }}">Change Requests</a> / {{ t.number }}</div>
+  <div class="obj-title">
+    <div>
+      <h1>{{ t.title }}</h1>
+      <div class="id">{{ t.number }} · {{ t.form_version.form.name }} (v{{ t.form_version.version }})</div>
+    </div>
+    <div class="actions">
+      {% if can_edit_values %}<a class="btn" href="{{ url_for('ticket_edit', tid=t.id) }}">Edit</a>{% endif %}
+      {% if g.user.can('ticket.create') and not t.form_version.form.archived and t.form_version.form.latest %}
+      <a class="btn transparent" href="{{ url_for('ticket_new', form=t.form_version.form.key, **{'from': t.id, 'link': 'follow_up_to'}) }}">Create Follow-up</a>
+      <a class="btn transparent" href="{{ url_for('ticket_new', form=t.form_version.form.key, **{'from': t.id, 'link': 'child_of'}) }}">Create Child</a>
+      {% endif %}
+    </div>
+  </div>
+  <dl class="kv">
+    <div><dt>Status</dt><dd>{{ status(t.status) }}</dd></div>
+    <div><dt>Priority</dt><dd>{{ priority(t.priority) }}
+      {% for r in t.open_priority_requests %}<span class="sub muted">Requested from {{ r.requested_to.name }}</span>{% endfor %}</dd></div>
+    <div><dt>Requester</dt><dd>{{ t.requester.name }}</dd></div>
+    <div><dt>Assignee</dt><dd>{{ t.assignee.name if t.assignee else 'Unassigned' }}</dd></div>
+    <div><dt>Due Date</dt><dd>{{ t.due_date|d }}</dd></div>
+    <div><dt>Created</dt><dd>{{ t.created_at|dt }}</dd></div>
+  </dl>
+  <nav class="anchors">
+    <a href="#details">Details</a>
+    {% if show_work %}<a href="#work">Work</a>{% endif %}
+    <a href="#approvals">Approvals</a>
+    <a href="#relationships">Relationships ({{ links|length }})</a>
+    <a href="#attachments">Attachments ({{ t.attachments|length }})</a>
+    <a href="#comments">Comments ({{ t.comments|length }})</a>
+    <a href="#history">History</a>
+  </nav>
+</div>
+
+<main>
+  {% if my_approval or my_requests %}
+  <div class="messages">
+    {% if my_approval %}<div class="msg warning">Your approval is needed at stage <b>{{ my_approval.stage_name }}</b>. <a href="#approvals">Review and decide</a></div>{% endif %}
+    {% for r in my_requests %}
+    <div class="msg warning"><b>{{ r.requested_by.name }}</b> asked you to set the priority{% if r.note %}: “{{ r.note }}”{% endif %}. <a href="#work">Set priority</a></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <section class="section" id="details">
+    <h2>Details</h2>
+    <div class="panel form-grid">
+      {% for f in t.form_version.schema.fields if f.type != 'section' and f.id in t.values %}
+      <div><label>{{ f.label }}</label>
+        <div class="val">
+          {% if f.type in ('file', 'image') %}
+            {% for aid in t.values[f.id] %}{% set a = attachments.get(aid) %}{% if a %}<a href="{{ url_for('attachment', aid=a.id) }}">{{ a.filename }}</a><br>{% endif %}{% else %}—{% endfor %}
+          {% else %}{{ show_value(f, t.values[f.id]) }}{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {% if show_work %}
+  <section class="section" id="work">
+    <h2>Work</h2>
+    <div class="work-grid">
+      {% if can_assign %}
+      <form class="panel pad" method="post" action="{{ url_for('ticket_assign', tid=t.id) }}">
+        <h3>Assignment</h3>
+        <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="rv" value="{{ t.row_version }}">
+        <div class="field"><label for="assignee">Assignee</label>
+          <select id="assignee" name="assignee_id"><option value="">Unassigned</option>
+            {% for u in core_users %}<option value="{{ u.id }}" {% if u.id == t.assignee_id %}selected{% endif %}>{{ u.name }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="due">Due Date</label>
+          <input id="due" name="due_date" type="date" value="{{ t.due_date.isoformat() if t.due_date else '' }}"></div>
+        <button class="btn emph" type="submit">Save Assignment</button>
+      </form>
+      {% endif %}
+
+      {% if can_set_priority %}
+      <form class="panel pad" method="post" action="{{ url_for('ticket_priority', tid=t.id) }}">
+        <h3>Priority</h3>
+        <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="rv" value="{{ t.row_version }}">
+        <div class="field"><label for="priority">Priority</label>
+          <select id="priority" name="priority" required><option value="">Select…</option>
+            {% for p in PRIORITIES %}<option {% if p == t.priority %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+        <button class="btn emph" type="submit">Set Priority</button>
+      </form>
+      {% endif %}
+
+      {% if can_assign %}
+      <form class="panel pad" method="post" action="{{ url_for('priority_request', tid=t.id) }}">
+        <h3>Ask Someone to Set Priority</h3>
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <div class="field"><label for="ask">Person</label>
+          <select id="ask" name="requested_to_id" required><option value="">Select…</option>
+            {% for u in core_users if u.id != g.user.id %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="note">Note (optional)</label>
+          <input id="note" name="note" maxlength="1000" placeholder="e.g. Please assess business impact"></div>
+        <button class="btn" type="submit">Send Request</button>
+        {% if t.open_priority_requests %}
+        <p class="hint">Waiting on: {% for r in t.open_priority_requests %}{{ r.requested_to.name }} (asked by {{ r.requested_by.name }}){{ ', ' if not loop.last }}{% endfor %}</p>
+        {% endif %}
+      </form>
+      {% endif %}
+
+      {% if (can_edit and t.status != 'Pending Approval' and (t.status != 'Closed' or g.user.can('ticket.reopen'))) or can_submit %}
+      <div class="panel pad">
+        <h3>Status</h3>
+        {% if can_edit and t.status != 'Pending Approval' and (t.status != 'Closed' or g.user.can('ticket.reopen')) %}
+        <form method="post" action="{{ url_for('ticket_status', tid=t.id) }}">
+          <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="rv" value="{{ t.row_version }}">
+          <div class="field"><label for="status">Status</label>
+            <select id="status" name="status">
+              {% if t.status not in MANUAL_STATUSES %}<option selected disabled>{{ t.status }}</option>{% endif %}
+              {% for s in MANUAL_STATUSES %}<option {% if s == t.status %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+          {% if t.status == 'Closed' %}<div class="field"><label for="reason">Reason for reopening</label><input id="reason" name="reason" maxlength="1000" required></div>{% endif %}
+          <button class="btn emph" type="submit">{{ 'Reopen' if t.status == 'Closed' else 'Update Status' }}</button>
+        </form>
+        {% endif %}
+        {% if can_submit %}
+        <form method="post" action="{{ url_for('ticket_submit', tid=t.id) }}" class="spaced">
+          <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="rv" value="{{ t.row_version }}">
+          <button class="btn" type="submit">{{ 'Resubmit' if t.approval_round else 'Submit' }} for Approval</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="section" id="approvals">
+    <h2>Approvals</h2>
+    {% if my_approval %}
+    <form class="panel pad narrow" method="post" action="{{ url_for('ticket_decide', tid=t.id) }}">
+      <h3>Your decision · {{ my_approval.stage_name }}</h3>
+      <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="rv" value="{{ t.row_version }}">
+      <div class="field"><label for="comment">Comment (required to reject or return)</label>
+        <textarea id="comment" name="comment" rows="3" maxlength="2000"></textarea></div>
+      <div class="actions">
+        <button class="btn" name="decision" value="returned" type="submit">Return</button>
+        <button class="btn reject" name="decision" value="rejected" type="submit">Reject</button>
+        <button class="btn accept" name="decision" value="approved" type="submit">Approve</button>
+      </div>
+    </form>
+    {% endif %}
+    {% for round, rows in rounds|dictsort(reverse=true) %}
+    <div class="panel table-wrap spaced">
+      <div class="table-toolbar"><h3>Round {{ round }}{% if round == t.approval_round %} (current){% endif %}</h3></div>
+      <table>
+        <thead><tr><th>Stage</th><th>Approver</th><th>Decision</th><th>Date</th><th>Comment</th><th>Reviewed data</th></tr></thead>
+        <tbody>
+          {% for a in rows %}
+          <tr>
+            <td>{{ a.stage_index + 1 }} · {{ a.stage_name }}<span class="sub">{{ 'one approver needed' if a.mode == 'any' else 'all approvers needed' }}</span></td>
+            <td>{{ a.approver.name }}</td>
+            <td>{% if a.decision == 'approved' %}<span class="status positive">Approved</span>
+              {% elif a.decision == 'rejected' %}<span class="status negative">Rejected</span>
+              {% elif a.decision == 'returned' %}<span class="status critical">Returned</span>
+              {% elif a.decision == 'skipped' %}<span class="muted">Not needed</span>
+              {% elif round == t.approval_round and a.stage_index == current_stage_index %}<span class="status critical">Waiting</span>
+              {% else %}<span class="muted">Not started yet</span>{% endif %}</td>
+            <td>{{ a.decided_at|dt if a.decided_at else '—' }}</td>
+            <td>{{ a.comment or '—' }}</td>
+            <td>{{ 'v' ~ a.data_version if a.data_version else '—' }}{% if a.data_version and a.data_version != t.data_version %}<span class="sub">changed since</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="panel empty">Not submitted for approval yet.</div>
+    {% endfor %}
+  </section>
+
+  <section class="section" id="relationships">
+    <h2>Relationships</h2>
+    <div class="panel table-wrap">
+      <table>
+        <thead><tr><th>Relationship</th><th>Request</th><th>Status</th>{% if can_link %}<th></th>{% endif %}</tr></thead>
+        <tbody>
+          {% for label, other, lk in links %}
+          <tr>
+            <td>{{ label }}</td>
+            <td>{% if can_view(other) %}<a href="{{ url_for('ticket_detail', tid=other.id) }}">{{ other.number }}</a> · {{ other.title }}{% else %}{{ other.number }}{% endif %}</td>
+            <td>{{ status(other.status) }}</td>
+            {% if can_link %}<td class="right">
+              <form method="post" action="{{ url_for('ticket_unlink', tid=t.id, lid=lk.id) }}">
+                <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn transparent" type="submit">Remove</button>
+              </form></td>{% endif %}
+          </tr>
+          {% else %}<tr><td colspan="4" class="empty">No linked requests.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if can_link %}
+    <form class="panel pad inline-form spaced" method="post" action="{{ url_for('ticket_link', tid=t.id) }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <div><label for="kind">This request is</label>
+        <select id="kind" name="kind">{% for k, labels in LINK_KINDS.items() %}<option value="{{ k }}">{{ labels[0] }}</option>{% endfor %}</select></div>
+      <div><label for="number">Request number</label><input id="number" name="number" placeholder="CHG-0001" required></div>
+      <button class="btn" type="submit">Add Link</button>
+    </form>
+    {% endif %}
+  </section>
+
+  <section class="section" id="attachments">
+    <h2>Attachments</h2>
+    <div class="panel table-wrap">
+      <table>
+        <thead><tr><th>File</th><th>Field</th><th>Uploaded By</th><th>Size</th><th>Date</th></tr></thead>
+        <tbody>
+          {% for a in t.attachments %}
+          <tr><td><a href="{{ url_for('attachment', aid=a.id) }}">{{ a.filename }}</a></td>
+            <td>{{ field_labels.get(a.field_id, 'Evidence') }}</td><td>{{ a.uploaded_by.name }}</td>
+            <td>{{ (a.size / 1024)|round(1) }} KB</td><td>{{ a.uploaded_at|dt }}</td></tr>
+          {% else %}<tr><td colspan="5" class="empty">No attachments.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if g.user.can('ticket.comment') %}
+    <form class="panel pad inline-form spaced" method="post" action="{{ url_for('ticket_upload', tid=t.id) }}" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <div><label for="files">Add evidence (pdf, images, office files, txt, csv, zip · 10 MB each)</label>
+        <input id="files" name="files" type="file" multiple required></div>
+      <button class="btn" type="submit">Upload</button>
+    </form>
+    {% endif %}
+  </section>
+
+  <section class="section" id="comments">
+    <h2>Comments</h2>
+    <div class="panel pad people">
+      <div><b>Emailed on every comment:</b>
+        {% for u in participants %}<span class="person">{{ u.name }}
+          {% if u in t.watchers and (u.id == g.user.id or g.user.can('ticket.assign')) %}
+          <form method="post" action="{{ url_for('watcher_remove', tid=t.id, uid=u.id) }}" class="inline">
+            <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="link-btn" type="submit" aria-label="Remove {{ u.name }}" title="Stop emailing {{ u.name }}">×</button></form>
+          {% endif %}</span>{% endfor %}
+      </div>
+      {% if g.user.can('ticket.comment') %}
+      <form class="inline-form spaced" method="post" action="{{ url_for('watcher_add', tid=t.id) }}">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <div><label for="watch-email">Add a person to this conversation</label>
+          <input id="watch-email" name="email" type="email" list="cmi-users" placeholder="name@company.com" required></div>
+        <datalist id="cmi-users">{% for u in all_users if u.is_core %}<option value="{{ u.email }}">{{ u.name }}</option>{% endfor %}</datalist>
+        <button class="btn" type="submit">Add</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="panel spaced">
+      {% for c in t.comments %}
+      <div class="comment"><div class="muted small">{{ c.author.name }} · {{ c.created_at|dt }}</div>{{ c.body }}</div>
+      {% else %}<div class="empty">No comments yet.</div>{% endfor %}
+    </div>
+    {% if g.user.can('ticket.comment') %}
+    <form class="panel pad spaced" method="post" action="{{ url_for('ticket_comment', tid=t.id) }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <label for="body">Add a comment</label>
+      <textarea id="body" name="body" rows="3" maxlength="5000" required></textarea>
+      <div class="actions"><button class="btn" type="submit">Post</button></div>
+    </form>
+    {% endif %}
+  </section>
+
+  <section class="section" id="history">
+    <h2>History</h2>
+    <div class="panel">
+      <ul class="timeline">
+        {% for h in t.history %}
+        <li><time>{{ h.at|dt }}</time><b>{{ h.actor.name }}</b>
+          {% if h.action == 'updated' %}changed {{ h.field }} from “{{ h.old or '—' }}” to “{{ h.new or '—' }}”
+          {% elif h.new %}{{ h.action }}: {{ h.new }}
+          {% else %}{{ h.action }}{% endif %}
+          {% if h.note %}<div class="muted small">“{{ h.note }}”</div>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </section>
+</main>
+{% endblock %}

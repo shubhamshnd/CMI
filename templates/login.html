@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Sign In{% endblock %}
+{% block shell %}Change Management Interface{% endblock %}
+{% block body %}
+<main class="login-wrap">
+  <div class="panel login-card">
+    <h1>Sign In</h1>
+    <p class="subtitle">Change Management Interface</p>
+    <nav class="tabs">
+      <a href="{{ url_for('login') }}" {% if mode != 'core' %}aria-current="page"{% endif %}>Requester</a>
+      <a href="{{ url_for('login', mode='core') }}" {% if mode == 'core' %}aria-current="page"{% endif %}>Core User</a>
+    </nav>
+
+    {% if mode == 'core' %}
+    <form method="post" action="{{ url_for('core_login') }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <div class="field"><label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="username" required autofocus></div>
+      <div class="field"><label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required></div>
+      <button class="btn emph" type="submit">Sign In</button>
+    </form>
+
+    {% elif otp_email %}
+    <form method="post" action="{{ url_for('otp_verify') }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <div class="field"><label for="code">Verification code sent to {{ otp_email }}</label>
+        <input id="code" name="code" class="otp" inputmode="numeric" autocomplete="one-time-code"
+               pattern="\d{6}" maxlength="6" required autofocus></div>
+      <button class="btn emph" type="submit">Verify &amp; Sign In</button>
+    </form>
+    <form method="post" action="{{ url_for('otp_send') }}" style="margin-top:10px">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <input type="hidden" name="email" value="{{ otp_email }}">
+      <button class="btn transparent" type="submit">Resend code</button>
+    </form>
+    <p class="hint">The code expires in 5 minutes. <a href="{{ url_for('login', reset=1) }}">Use a different email</a></p>
+
+    {% else %}
+    <form method="post" action="{{ url_for('otp_send') }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <div class="field"><label for="email">Work Email</label>
+        <input id="email" name="email" type="email" placeholder="name@company.com" autocomplete="email" required autofocus></div>
+      <button class="btn emph" type="submit">Send Code</button>
+    </form>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}

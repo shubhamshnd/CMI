@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block shell %}Administration{% endblock %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  <form class="panel filterbar" method="get">
+    <div><label for="q">Search</label><input id="q" name="q" type="search" value="{{ request.args.q }}" placeholder="Name or email"></div>
+    <button class="btn emph" type="submit">Go</button>
+    <a class="btn" href="{{ url_for('admin.user_edit') }}">New Core User</a>
+  </form>
+  <div class="panel table-wrap">
+    <table>
+      <thead><tr><th>User</th><th>Sign-in</th><th>Profiles</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td><a href="{{ url_for('admin.user_edit', uid=u.id) }}">{{ u.name }}</a><span class="sub">{{ u.email }}</span></td>
+          <td>{{ 'Password (core)' if u.is_core else 'Email code (requester)' }}</td>
+          <td>{{ u.profiles|map(attribute='name')|join(', ') or '—' }}</td>
+          <td>{% if not u.active %}<span class="status neutral">Deactivated</span>
+            {% elif u.locked_until and u.locked_until > now %}<span class="status negative">Locked</span>
+            {% else %}<span class="status positive">Active</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</main>
+{% endblock %}
