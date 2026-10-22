@@ -255,7 +255,7 @@
       <form class="inline-form spaced" method="post" action="{{ url_for('watcher_add', tid=t.id) }}">
         <input type="hidden" name="_csrf" value="{{ csrf }}">
         <div><label for="watch-email">Add a person to this conversation</label>
-          <input id="watch-email" name="email" type="email" list="cmi-users" placeholder="name@company.com" required></div>
+          <input id="watch-email" name="email" type="email" list="cmi-users" placeholder="name@jsw.in" required></div>
         <datalist id="cmi-users">{% for u in all_users if u.is_core %}<option value="{{ u.email }}">{{ u.name }}</option>{% endfor %}</datalist>
         <button class="btn" type="submit">Add</button>
       </form>

@@ -4,6 +4,7 @@
 {% block body %}
 <main class="login-wrap">
   <div class="panel login-card">
+    {% if config.SHOW_OTP %}<div class="msg warning">Testing mode: sign-in codes are shown on screen. Set CMI_SHOW_OTP=0 in .env before going live.</div>{% endif %}
     <h1>Sign In</h1>
     <p class="subtitle">Change Management Interface</p>
     <nav class="tabs">
@@ -40,7 +41,7 @@
     <form method="post" action="{{ url_for('otp_send') }}">
       <input type="hidden" name="_csrf" value="{{ csrf }}">
       <div class="field"><label for="email">Work Email</label>
-        <input id="email" name="email" type="email" placeholder="name@company.com" autocomplete="email" required autofocus></div>
+        <input id="email" name="email" type="email" placeholder="name@jsw.in" autocomplete="email" required autofocus></div>
       <button class="btn emph" type="submit">Send Code</button>
     </form>
     {% endif %}

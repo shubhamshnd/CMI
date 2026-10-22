@@ -91,6 +91,20 @@ def test_otp_login_is_single_use(mail):
     assert post(c2, "/login/otp/verify", code=code).location == "/login"
 
 
+def test_show_otp_toggle_puts_code_on_screen_only_when_on(mail, monkeypatch):
+    c = cmi.app.test_client()
+    post(c, "/login/otp/send", email="off@corp.com")
+    code = re.search(r"\b(\d{6})\b", mail[-1][2]).group(1)
+    assert code not in c.get("/login").get_data(as_text=True)  # default: off
+    monkeypatch.setitem(cmi.app.config, "SHOW_OTP", True)
+    c = cmi.app.test_client()
+    post(c, "/login/otp/send", email="on@corp.com")
+    code = re.search(r"\b(\d{6})\b", mail[-1][2]).group(1)
+    page = c.get("/login").get_data(as_text=True)
+    assert f"your code is {code}" in page and "Testing mode" in page
+    assert post(c, "/login/otp/verify", code=code).location == "/"
+
+
 def test_core_user_cannot_use_otp(mail):
     c = cmi.app.test_client()
     post(c, "/login/otp/send", email="admin@cmi.local")
