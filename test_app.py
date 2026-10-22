@@ -105,6 +105,16 @@ def test_show_otp_toggle_puts_code_on_screen_only_when_on(mail, monkeypatch):
     assert post(c, "/login/otp/verify", code=code).location == "/"
 
 
+def test_test_mode_never_opens_smtp(monkeypatch):
+    def no_smtp(*a, **k):
+        raise AssertionError("SMTP must not be used in test mode")
+    monkeypatch.setattr(core.smtplib, "SMTP", no_smtp)
+    monkeypatch.setitem(cmi.app.config, "MAIL_SERVER", "smtp.unreachable.example")
+    monkeypatch.setitem(cmi.app.config, "SHOW_OTP", True)
+    with cmi.app.app_context():
+        core.send_mail("x@jsw.in", "subject", "body")  # printed to the console instead
+
+
 def test_core_user_cannot_use_otp(mail):
     c = cmi.app.test_client()
     post(c, "/login/otp/send", email="admin@cmi.local")

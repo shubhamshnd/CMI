@@ -32,8 +32,8 @@ _SIGNATURES = {"png": b"\x89PNG\r\n\x1a\n", "jpg": b"\xff\xd8\xff", "jpeg": b"\x
 
 def send_mail(to, subject, body):
     cfg = current_app.config
-    if not cfg["MAIL_SERVER"]:
-        log.warning("MAIL to=%s | %s\n%s", to, subject, body)  # dev: mail goes to the console
+    if not cfg["MAIL_SERVER"] or cfg["SHOW_OTP"]:  # dev / test mode: never touch SMTP, print to the console
+        log.warning("MAIL to=%s | %s\n%s", to, subject, body)
         return
     msg = EmailMessage()
     msg["From"], msg["To"], msg["Subject"] = cfg["MAIL_FROM"], to, subject

@@ -69,7 +69,8 @@ app.config.update(
 if "CMI_SECRET_KEY" not in os.environ:
     log.warning("CMI_SECRET_KEY not set: using a random key, sessions reset on restart.")
 if app.config["SHOW_OTP"]:
-    log.warning("CMI_SHOW_OTP=1: sign-in codes are shown on screen. Anyone can sign in as any requester. Turn off before going live.")
+    log.warning("CMI_SHOW_OTP=1: sign-in codes are shown on screen and NO email is sent (all mail goes to this console). "
+                "Anyone can sign in as any requester. Turn off before going live.")
 db.init_app(app)
 Migrate(app, db, render_as_batch=True,  # batch mode: SQLite needs table rebuilds for ALTERs
         directory=os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations"))
@@ -161,9 +162,10 @@ def otp_send():
         db.session.add(OtpChallenge(email=email, code_hash=generate_password_hash(code), expires_at=utcnow() + OTP_TTL))
         db.session.commit()
         core.send_mail(email, "Your CMI sign-in code", f"Your CMI sign-in code is {code}. It expires in 5 minutes.")
-        flash(f"We sent a 6-digit code to {email}.", "success")
         if app.config["SHOW_OTP"]:
-            flash(f"Testing mode (CMI_SHOW_OTP): your code is {code}", "warning")
+            flash(f"Testing mode (CMI_SHOW_OTP): your code is {code}. No email was sent.", "warning")
+        else:
+            flash(f"We sent a 6-digit code to {email}.", "success")
     session["otp_email"] = email
     return redirect(url_for("login"))
 
