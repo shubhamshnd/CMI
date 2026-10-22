@@ -7,13 +7,14 @@
   <div class="panel table-wrap">
     <div class="table-toolbar"><h3>Forms ({{ forms|length }})</h3></div>
     <table>
-      <thead><tr><th>Form</th><th>Published</th><th>Approval stages</th><th>Tickets</th><th></th></tr></thead>
+      <thead><tr><th>Form</th><th>Published</th><th>Workflow &amp; notify</th><th>Tickets</th><th></th></tr></thead>
       <tbody>
         {% for f in forms %}
         <tr>
           <td><a href="{{ url_for('admin.form_edit', fid=f.id) }}">{{ f.name }}</a><span class="sub">{{ f.key }}{% if f.archived %} · archived{% endif %}</span></td>
           <td>{{ 'v' ~ f.latest.version if f.latest else 'Not published' }}{% if f.latest and f.has_unpublished_changes %}<span class="sub status critical">Unpublished changes</span>{% endif %}</td>
-          <td><a href="{{ url_for('admin.form_workflow', fid=f.id) }}">{{ f.workflow|length }} stage(s)</a></td>
+          <td><a href="{{ url_for('admin.form_workflow', fid=f.id) }}">{{ f.workflow|length }} stage(s)</a>
+            <span class="sub"><a href="{{ url_for('admin.form_notify', fid=f.id) }}">{{ f.notify|length }} notified</a></span></td>
           <td>{{ usage[f.id] }}</td>
           <td class="right">
             <form method="post" action="{{ url_for('admin.form_duplicate', fid=f.id) }}" class="inline">

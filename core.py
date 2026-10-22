@@ -10,7 +10,7 @@ from email.message import EmailMessage
 from flask import abort, current_app, g
 from werkzeug.datastructures import MultiDict
 
-from models import Attachment, TicketHistory, db, utcnow
+from models import Attachment, TicketHistory, User, db, utcnow
 
 log = logging.getLogger("cmi")
 
@@ -46,9 +46,26 @@ def send_mail(to, subject, body):
         smtp.send_message(msg)
 
 
-def notify(users, subject, body):
-    """Workflow mail: a mail outage must not undo or hide a saved change."""
-    for u in {u.id: u for u in users if u and u.active and u.id != g.user.id}.values():
+# Events a form's notify list can subscribe to.
+EVENTS = {
+    "new": "New requests",
+    "comment": "Comments",
+    "status": "Status changes & approval decisions",
+    "update": "Edits, assignment & priority changes",
+}
+
+
+def subscribers(t, event):
+    """Active users on the ticket's form notify list for this event."""
+    ids = [s["user_id"] for s in t.form_version.form.notify if event in s["events"]]
+    return User.query.filter(User.id.in_(ids), User.active.is_(True)).all() if ids else []
+
+
+def notify(users, subject, body, skip=()):
+    """Workflow mail: a mail outage must not undo or hide a saved change.
+    Never mails the person acting, or anyone in skip (they got a more specific mail)."""
+    skip_ids = {u.id for u in skip if u} | {g.user.id}
+    for u in {u.id: u for u in users if u and u.active and u.id not in skip_ids}.values():
         try:
             send_mail(u.email, subject, body)
         except Exception:
@@ -68,7 +85,8 @@ def asked_for_priority(user, t):
 
 def can_view(user, t):
     return (user.can("ticket.view") or user.id in (t.requester_id, t.assignee_id) or user in t.watchers
-            or asked_for_priority(user, t) or any(a.approver_id == user.id for a in t.approvals))
+            or asked_for_priority(user, t) or any(a.approver_id == user.id for a in t.approvals)
+            or any(s["user_id"] == user.id for s in t.form_version.form.notify))  # on the form's notify list
 
 
 def participants(t):

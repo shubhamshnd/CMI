@@ -5,9 +5,9 @@
 {% block body %}
 <main class="page">
   {% include "_admin_nav.html" %}
+  {% include "_form_tabs.html" %}
   <div class="msg info">Preview of {{ 'version ' ~ fv.version if fv else 'the current draft' }}. Nothing is submitted.
     <a href="{{ url_for('admin.form_edit', fid=form.id) }}">Back to the builder</a></div>
-  <h1 class="title">{{ form.name }}</h1>
   <p class="subtitle">{{ form.description }}</p>
   <form class="panel pad narrow" data-dynamic>
     <div class="field"><label class="req">Title</label><input></div>

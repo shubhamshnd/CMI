@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Notify · {{ form.name }}{% endblock %}
+{% block shell %}Notifications{% endblock %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  {% include "_form_tabs.html" %}
+  <p class="subtitle">People here get an email for the events you tick, for <b>every</b> {{ form.name }} request, and can open those requests.
+    Requesters, assignees and approvers are emailed about their own requests anyway.</p>
+
+  <form method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <div class="panel table-wrap">
+      <table>
+        <thead><tr><th>Person</th>{% for key, label in EVENTS.items() %}<th class="center">{{ label }}</th>{% endfor %}<th></th></tr></thead>
+        <tbody>
+          {% for s in form.notify if s.user_id in users %}
+          {% set u = users[s.user_id] %}
+          <tr>
+            <td><input type="hidden" name="uid" value="{{ u.id }}">{{ u.name }}<span class="sub">{{ u.email }}{% if not u.active %} · inactive, not emailed{% endif %}</span></td>
+            {% for key, label in EVENTS.items() %}
+            <td class="center"><input type="checkbox" name="ev_{{ u.id }}" value="{{ key }}" aria-label="{{ label }} for {{ u.name }}" {% if key in s.events %}checked{% endif %}></td>
+            {% endfor %}
+            <td class="right"><button class="btn transparent reject" name="remove" value="{{ u.id }}" type="submit">Remove</button></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="{{ EVENTS|length + 2 }}" class="empty">Nobody yet. Add people below.</td></tr>
+          {% endfor %}
+          <tr class="add-row">
+            <td><label for="new-email">Add a person</label>
+              <input id="new-email" name="new_email" type="email" list="cmi-users" placeholder="name@company.com"></td>
+            {% for key, label in EVENTS.items() %}
+            <td class="center"><input type="checkbox" name="new_events" value="{{ key }}" aria-label="{{ label }} for the new person" checked></td>
+            {% endfor %}
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <datalist id="cmi-users">{% for u in candidates %}<option value="{{ u.email }}">{{ u.name }}</option>{% endfor %}</datalist>
+    <div class="actions spaced"><button class="btn emph" type="submit">Save</button></div>
+  </form>
+</main>
+{% endblock %}

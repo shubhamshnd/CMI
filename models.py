@@ -20,6 +20,7 @@ PERMISSIONS = {
     "ticket.reopen": "Reopen closed tickets",
     "ticket.link": "Link related tickets",
     "ticket.approve": "Act as an approver",
+    "ticket.delete": "Delete requests (hidden from CMI, kept in the database)",
     "form.publish": "Build and publish forms, configure workflows",
     "user.manage": "Manage users and permission profiles",
     "report.view": "View reports and export",
@@ -112,6 +113,8 @@ class Form(db.Model):
     archived = db.Column(db.Boolean, default=False, nullable=False)
     # Approval stages: [{"name", "mode": "any"|"all", "approvers": [user ids], "condition": {"field", "equals"} | None}]
     workflow = db.Column(db.JSON, default=list, nullable=False)
+    # Form-level subscribers: [{"user_id": 3, "events": ["new", "comment", "status", "update"]}] (see core.EVENTS)
+    notify = db.Column(db.JSON, default=list, nullable=False, server_default="[]")
     default_assignee_id = db.Column(db.ForeignKey("user.id"))
     deleted_at = db.Column(db.DateTime)  # soft delete: hidden everywhere; restore by clearing it in the DB
     versions = db.relationship("FormVersion", order_by="FormVersion.version", back_populates="form")
@@ -159,6 +162,7 @@ class Ticket(db.Model):
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow, nullable=False)
     closed_at = db.Column(db.DateTime)
+    deleted_at = db.Column(db.DateTime)  # soft delete: hidden everywhere; restore by clearing it in the DB
 
     form_version = db.relationship("FormVersion")
     requester = db.relationship("User", foreign_keys=[requester_id])
@@ -171,6 +175,10 @@ class Ticket(db.Model):
                                 back_populates="ticket")
     attachments = db.relationship("Attachment", order_by="Attachment.id", back_populates="ticket")
     watchers = db.relationship("User", secondary="ticket_watcher", order_by="User.name")
+
+    @classmethod
+    def live(cls):
+        return cls.query.filter(cls.deleted_at.is_(None))
 
     @property
     def number(self):

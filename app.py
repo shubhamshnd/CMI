@@ -29,7 +29,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 import core
 from core import (MANUAL_STATUSES, MIN_PASSWORD, PRIORITY_CLASS, STATUS_CLASS, Invalid, as_form_data, asked_for_priority,
-                  can_edit_values, can_set_priority, can_submit, can_view, change, need, notify, participants, record,
+                  can_edit_values, can_set_priority, can_submit, can_view, change, need, notify, participants, record, subscribers,
                   set_status,
                   show_value, store_upload, validate)
 from models import (LINK_KINDS, PERMISSIONS, PRIORITIES, STATUSES, Attachment, Comment, Form, FormVersion,
@@ -46,7 +46,9 @@ PUBLIC_ENDPOINTS = {"login", "otp_send", "otp_verify", "core_login", "static"}
 
 log = logging.getLogger("cmi")
 
-app = Flask(__name__)
+# Pin instance/ (database, uploads) to this folder: when run as `python app.py`, Flask would
+# otherwise put it under whatever directory the command was started from.
+app = Flask(__name__, instance_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "instance"))
 app.config.update(
     SECRET_KEY=os.environ.get("CMI_SECRET_KEY") or secrets.token_hex(32),
     SQLALCHEMY_DATABASE_URI=os.environ.get("CMI_DATABASE_URL", "sqlite:///cmi.db"),
@@ -237,7 +239,7 @@ def account():
 # ---------------------------------------------------------------- helpers
 
 def get_ticket(tid):
-    t = db.session.get(Ticket, tid) or abort(404)
+    t = Ticket.live().filter_by(id=tid).first_or_404()
     if not can_view(g.user, t):
         abort(403)
     return t
@@ -265,18 +267,19 @@ def parse_number(text):
 
 
 def awaiting_my_approval(u):
-    candidates = Ticket.query.filter(Ticket.status == "Pending Approval", Ticket.approvals.any(
+    candidates = Ticket.live().filter(Ticket.status == "Pending Approval", Ticket.approvals.any(
         (TicketApproval.approver_id == u.id) & TicketApproval.decision.is_(None))).all()
     return [t for t in candidates if pending_for(u, t)]
 
 
 def counts(u):
     return dict(
-        mine=Ticket.query.filter_by(requester_id=u.id).count(),
-        assigned=Ticket.query.filter(Ticket.assignee_id == u.id, Ticket.status != "Closed").count(),
-        priority=PriorityRequest.query.filter_by(requested_to_id=u.id, status="open").count(),
+        mine=Ticket.live().filter_by(requester_id=u.id).count(),
+        assigned=Ticket.live().filter(Ticket.assignee_id == u.id, Ticket.status != "Closed").count(),
+        priority=PriorityRequest.query.join(Ticket).filter(PriorityRequest.requested_to_id == u.id,
+                                                           PriorityRequest.status == "open", Ticket.deleted_at.is_(None)).count(),
         approvals=len(awaiting_my_approval(u)),
-        all=Ticket.query.count() if u.can("ticket.view") else None,
+        all=Ticket.live().count() if u.can("ticket.view") else None,
     )
 
 
@@ -303,7 +306,7 @@ def tickets():
     tab = args.get("tab", "mine")
     if tab not in TABS or (tab == "all" and not u.can("ticket.view")):
         tab = "mine"
-    q = Ticket.query
+    q = Ticket.live()
     if tab == "mine":
         q = q.filter(Ticket.requester_id == u.id)
     elif tab == "assigned":
@@ -376,6 +379,8 @@ def ticket_new():
             db.session.commit()
             flash(f"{t.number} created.", "success")
             notify([t.assignee], f"{t.number} assigned to you", f"New request {t.number} – {t.title}.\n\n{link(t)}")
+            notify(subscribers(t, "new"), f"[{t.number}] New request: {t.title}",
+                   f"{g.user.name} submitted {t.number} – {t.title} ({form.name}).\n\n{link(t)}", skip=[t.assignee])
             return back(t)
         data = request.form
     elif source:  # carry forward matching fields from the earlier ticket
@@ -402,12 +407,13 @@ def ticket_edit(tid):
                 values[fid].append(store_upload(t, fid, name, data).id)
             reason = request.form.get("reason", "").strip()[:1000]
             change(t, "title", title[:200])
-            material = False
+            material, changed = False, ["Title"] if title[:200] != t.title else []
             for f in fields:
                 old, new = t.values.get(f["id"]), values.get(f["id"])
                 if f["type"] != "section" and old != new and not (old in (None, "", []) and new in (None, "", [])):
                     record(t, "updated", f["label"], show_value(f, old), show_value(f, new), note=reason)
                     material = material or bool(f.get("material"))
+                    changed.append(f["label"])
             if values != t.values:
                 t.values = values
                 t.data_version += 1
@@ -423,6 +429,10 @@ def ticket_edit(tid):
                     flash(f"Approval was invalidated by a material change. {e}", "warning")
             db.session.commit()
             flash("Changes saved.", "success")
+            if changed:
+                notify([t.requester, t.assignee, *subscribers(t, "update")], f"[{t.number}] {t.title}",
+                       f"{g.user.name} edited {t.number}: {', '.join(changed)}."
+                       + (f"\nReason: {reason}" if reason else "") + f"\n\n{link(t, 'history')}")
             return back(t)
     data = request.form if request.method == "POST" else as_form_data(t.form_version.schema, t.values)
     if request.method == "GET":
@@ -437,6 +447,7 @@ def ticket_detail(tid):
     core_users = User.query.filter_by(is_core=True, active=True).order_by(User.name).all()
     links = [(LINK_KINDS[l.kind][0], l.to_ticket, l) for l in TicketLink.query.filter_by(from_ticket_id=t.id)]
     links += [(LINK_KINDS[l.kind][1], l.from_ticket, l) for l in TicketLink.query.filter_by(to_ticket_id=t.id)]
+    links = [x for x in links if not x[1].deleted_at]  # links to deleted requests are hidden
     rounds = {}
     for a in t.approvals:
         rounds.setdefault(a.round, []).append(a)
@@ -472,6 +483,9 @@ def ticket_assign(tid):
         flash("Assignment saved.", "success")
         if reassigned:
             notify([assignee], f"{t.number} assigned to you", f"{g.user.name} assigned you {t.number} – {t.title}.\n\n{link(t)}")
+        notify(subscribers(t, "update"), f"[{t.number}] {t.title}",
+               f"{g.user.name} set the assignee of {t.number} to {t.assignee.name if t.assignee else 'nobody'}"
+               f" (due {t.due_date or 'not set'}).\n\n{link(t)}", skip=[assignee] if reassigned else [])
     return back(t)
 
 
@@ -493,7 +507,7 @@ def ticket_priority(tid):
     t.row_version += 1
     db.session.commit()
     flash(f"Priority set to {priority}.", "success")
-    notify([r.requested_by for r in closed], f"{t.number}: priority set to {priority}",
+    notify([*(r.requested_by for r in closed), *subscribers(t, "update")], f"{t.number}: priority set to {priority}",
            f"{g.user.name} set the priority of {t.number} – {t.title} to {priority}.\n\n{link(t)}")
     return back(t)
 
@@ -540,7 +554,9 @@ def ticket_status(tid):
         t.row_version += 1
         db.session.commit()
         flash(f"Status changed to {status}.", "success")
-        notify([t.requester, t.assignee], f"{t.number}: {status}", f"{g.user.name} changed {t.number} to {status}.\n\n{link(t)}")
+        notify([t.requester, t.assignee, *subscribers(t, "status")], f"{t.number}: {status}",
+               f"{g.user.name} {'reopened' if reopened else 'changed'} {t.number} – {t.title}"
+               f"{'' if reopened else ' to ' + status}.\n\n{link(t)}")
     return back(t)
 
 
@@ -595,7 +611,7 @@ def ticket_comment(tid):
         db.session.add(Comment(ticket_id=t.id, author_id=g.user.id, body=body))
         record(t, "added a comment")
         db.session.commit()
-        notify(participants(t), f"[{t.number}] {t.title}",
+        notify([*participants(t), *subscribers(t, "comment")], f"[{t.number}] {t.title}",
                f"{g.user.name} commented on {t.number}:\n\n{body}\n\n"
                f"Reply in CMI (replies to this email are not read): {link(t, 'comments')}")
     return back(t, "comments")
@@ -668,7 +684,7 @@ def ticket_link(tid):
     t = get_ticket(tid)
     need("ticket.link")
     kind = request.form.get("kind")
-    other = db.session.get(Ticket, parse_number(request.form.get("number")) or 0)
+    other = Ticket.live().filter_by(id=parse_number(request.form.get("number")) or 0).first()
     if kind not in LINK_KINDS:
         abort(400)
     error = None
@@ -699,6 +715,18 @@ def ticket_link(tid):
         db.session.commit()
         flash(f"Linked: {LINK_KINDS[kind][0]} {other.number}.", "success")
     return back(t, "relationships")
+
+
+@app.post("/tickets/<int:tid>/delete")
+def ticket_delete(tid):
+    """Soft delete: the request disappears from CMI but stays in the database (restore by clearing deleted_at)."""
+    t = get_ticket(tid)
+    need("ticket.delete")
+    t.deleted_at = utcnow()
+    record(t, "deleted the request", note=request.form.get("reason", "").strip()[:1000])
+    db.session.commit()
+    flash(f"{t.number} deleted.", "success")
+    return redirect(url_for("tickets", tab="all" if g.user.can("ticket.view") else "mine"))
 
 
 @app.post("/tickets/<int:tid>/links/<int:lid>/delete")
@@ -873,6 +901,10 @@ if __name__ == "__main__":
     with app.app_context():
         upgrade()
     host, port = os.environ.get("CMI_HOST", "0.0.0.0"), int(os.environ.get("CMI_PORT", 8080))
+    import socket
+    with socket.socket() as probe:  # Windows lets two servers bind one port; refuse instead of silently sharing it
+        if probe.connect_ex(("127.0.0.1" if host == "0.0.0.0" else host, port)) == 0:
+            raise SystemExit(f"Something is already running on port {port} (another CMI?). Stop it or set CMI_PORT in .env.")
     try:
         server = create_server(app, host=host, port=port, threads=8)
     except OSError as e:

@@ -1,0 +1,6 @@
+<h1 class="title">{{ form.name }} <span class="muted">· {{ form.key }}</span></h1>
+<nav class="tabs panel form-tabs">
+  <a href="{{ url_for('admin.form_edit', fid=form.id) }}" {% if request.endpoint in ('admin.form_edit', 'admin.form_preview') %}aria-current="page"{% endif %}>Fields</a>
+  <a href="{{ url_for('admin.form_workflow', fid=form.id) }}" {% if request.endpoint == 'admin.form_workflow' %}aria-current="page"{% endif %}>Workflow</a>
+  <a href="{{ url_for('admin.form_notify', fid=form.id) }}" {% if request.endpoint == 'admin.form_notify' %}aria-current="page"{% endif %}>Notify<span class="n">{{ form.notify|length }}</span></a>
+</nav>

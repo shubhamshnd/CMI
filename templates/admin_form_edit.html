@@ -29,10 +29,9 @@
 {% block body %}
 <main class="page">
   {% include "_admin_nav.html" %}
-  <h1 class="title">{{ form.name }} <span class="muted">· {{ form.key }}</span></h1>
+  {% include "_form_tabs.html" %}
   <p class="subtitle">
     {% if form.latest %}Published v{{ form.latest.version }}{% if form.has_unpublished_changes %} · <span class="status critical">draft has unpublished changes</span>{% endif %}{% else %}Not published yet{% endif %}
-    · <a href="{{ url_for('admin.form_workflow', fid=form.id) }}">Approval workflow</a>
   </p>
 
   <form method="post" data-rows>

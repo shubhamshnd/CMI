@@ -1,7 +1,7 @@
 """Approval engine: ordered stages (sequential), each needing one ('any') or every ('all') listed approver."""
 from flask import url_for
 
-from core import Invalid, notify, record, set_status
+from core import Invalid, notify, record, set_status, subscribers
 from models import TicketApproval, User, db, utcnow
 
 
@@ -62,11 +62,12 @@ def start_approval(t, reason="submitted for approval"):
             db.session.add(TicketApproval(ticket=t, round=t.approval_round, stage_index=i, stage_name=s["name"],
                                           mode=s.get("mode", "any"), approver=u))
     record(t, reason, None, None, ", ".join(s["name"] for s, _ in stages) or "no approval stages apply")
-    if not stages:
-        set_status(t, "Approved")
-        return
-    set_status(t, "Pending Approval")
-    _ask(t, current_stage(t))
+    set_status(t, "Pending Approval" if stages else "Approved")
+    if stages:
+        _ask(t, current_stage(t))
+    notify(subscribers(t, "status"), f"{t.number}: {t.status}",
+           f"{t.number} – {t.title}: {reason}" + (" (no approval stages apply, so it is approved)" if not stages else "")
+           + f".\n\n{_link(t)}", skip=[r.approver for r in current_stage(t)])
 
 
 def decide(t, row, decision, comment, actor):
@@ -77,7 +78,7 @@ def decide(t, row, decision, comment, actor):
             if r.decision is None:
                 r.decision = "skipped"
         set_status(t, "Rejected" if decision == "rejected" else "Returned")
-        notify([t.requester, t.assignee], f"{t.number}: {decision} by {actor.name}",
+        notify([t.requester, t.assignee, *subscribers(t, "status")], f"{t.number}: {decision} by {actor.name}",
                f"{actor.name} {decision} {t.number} – {t.title} at stage {row.stage_name}."
                + (f"\n\nComment: {comment}" if comment else "") + f"\n\n{_link(t)}")
         return
@@ -92,4 +93,5 @@ def decide(t, row, decision, comment, actor):
         _ask(t, nxt)
     else:
         set_status(t, "Approved")
-        notify([t.requester, t.assignee], f"{t.number}: approved", f"{t.number} – {t.title} is fully approved.\n\n{_link(t)}")
+        notify([t.requester, t.assignee, *subscribers(t, "status")], f"{t.number}: approved",
+               f"{t.number} – {t.title} is fully approved.\n\n{_link(t)}")

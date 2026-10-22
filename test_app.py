@@ -314,6 +314,49 @@ def test_comments_email_everyone_on_the_request(mail):
     assert post(login("lead@cmi.local"), f"/tickets/{tid}/watchers/{uid('colleague@corp.com')}/delete").status_code == 403
 
 
+def test_form_notify_list_gets_chosen_events_only(mail):
+    admin = login("admin@cmi.local")
+    with cmi.app.app_context():
+        from models import Form
+        fid = Form.query.filter_by(key="INFRA_CHANGE").one().id
+    post(admin, f"/admin/forms/{fid}/notify", new_email="engineer@cmi.local", new_events=["new", "status"])
+    post(admin, f"/admin/forms/{fid}/notify", uid=str(uid("engineer@cmi.local")), **{f"ev_{uid('engineer@cmi.local')}": ["new", "status"]},
+         new_email="cab@cmi.local", new_events="comment")
+    with cmi.app.app_context():
+        assert {s["user_id"]: s["events"] for s in db.session.get(Form, fid).notify} == {
+            uid("engineer@cmi.local"): ["new", "status"], uid("cab@cmi.local"): ["comment"]}
+    mail.clear()
+    tid = create(login("assigner@cmi.local"))  # Medium risk: CAB is not an approver here
+    assert [m[0] for m in mail] == ["engineer@cmi.local"] and "New request" in mail[0][1]
+    cab = login("cab@cmi.local")
+    assert cab.get(f"/tickets/{tid}").status_code == 200  # on the notify list, so the email link works
+    mail.clear()
+    post(admin, f"/tickets/{tid}/comment", body="Window confirmed")
+    assert sorted(m[0] for m in mail) == ["assigner@cmi.local", "cab@cmi.local"]  # requester + comment subscriber
+    mail.clear()
+    post(admin, f"/tickets/{tid}/status", rv=rv(tid), status="In Progress")
+    assert sorted(m[0] for m in mail) == ["assigner@cmi.local", "engineer@cmi.local"]  # requester + status subscriber
+    # remove
+    post(admin, f"/admin/forms/{fid}/notify", uid=[str(uid("engineer@cmi.local")), str(uid("cab@cmi.local"))],
+         **{f"ev_{uid('engineer@cmi.local')}": "new", f"ev_{uid('cab@cmi.local')}": "comment"}, remove=str(uid("cab@cmi.local")))
+    with cmi.app.app_context():
+        assert [s["user_id"] for s in db.session.get(Form, fid).notify] == [uid("engineer@cmi.local")]
+
+
+def test_admin_soft_deletes_a_request(mail):
+    admin = login("admin@cmi.local")
+    keep, gone = create(admin, title="Keep me"), create(admin, title="Remove me")
+    post(admin, f"/tickets/{keep}/links", kind="related", number=f"CHG-{gone:04d}")
+    assert post(login("engineer@cmi.local"), f"/tickets/{gone}/delete").status_code == 403
+    post(admin, f"/tickets/{gone}/delete")
+    assert admin.get(f"/tickets/{gone}").status_code == 404
+    assert "Remove me" not in admin.get("/tickets?tab=all").get_data(as_text=True)
+    assert "Remove me" not in admin.get(f"/tickets/{keep}").get_data(as_text=True)  # link hidden too
+    assert "Remove me" not in admin.get("/tickets?tab=all&export=csv").get_data(as_text=True)
+    with cmi.app.app_context():
+        assert ticket(gone).deleted_at and ticket(gone).title == "Remove me"  # still in the database
+
+
 # ---------------------------------------------------------------- export & backup
 
 def test_csv_export_neutralises_formulas(mail):

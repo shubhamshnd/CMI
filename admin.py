@@ -9,7 +9,7 @@ from statistics import mean
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
 from werkzeug.security import generate_password_hash
 
-from core import FILE_TYPES, MIN_PASSWORD, need
+from core import EVENTS, FILE_TYPES, MIN_PASSWORD, need
 from models import (FIELD_TYPES, PERMISSIONS, Form, FormVersion, PermissionProfile, Ticket, TicketApproval, User, db,
                     utcnow)
 
@@ -85,7 +85,7 @@ def validate_schema(fields):
 @bp.get("/forms")
 def forms():
     need("form.publish")
-    usage = Counter(fid for (fid,) in db.session.query(FormVersion.form_id).join(Ticket, Ticket.form_version_id == FormVersion.id))
+    usage = Counter(fid for (fid,) in db.session.query(FormVersion.form_id).join(Ticket, Ticket.form_version_id == FormVersion.id).filter(Ticket.deleted_at.is_(None)))
     return render_template("admin_forms.html", forms=Form.live().order_by(Form.archived, Form.name).all(), usage=usage)
 
 
@@ -177,6 +177,41 @@ def form_archive(fid):
     db.session.commit()
     flash(f"{form.name} {'archived: hidden from the catalogue' if form.archived else 'restored to the catalogue'}.", "success")
     return redirect(url_for("admin.forms"))
+
+
+@bp.route("/forms/<int:fid>/notify", methods=["GET", "POST"])
+def form_notify(fid):
+    """People emailed about every request on this form, per event (new, comment, status, update)."""
+    need("form.publish")
+    form = Form.live().filter_by(id=fid).first_or_404()
+    if request.method == "POST":
+        removed = request.form.get("remove", type=int)
+        subs = []
+        for uid in dict.fromkeys(request.form.getlist("uid", type=int)):
+            events = [e for e in EVENTS if e in request.form.getlist(f"ev_{uid}")]
+            if events and uid != removed:  # unticking every event also removes the person
+                subs.append({"user_id": uid, "events": events})
+        email = request.form.get("new_email", "").strip().lower()
+        if email:
+            u = User.live().filter_by(email=email, active=True).first()
+            events = [e for e in EVENTS if e in request.form.getlist("new_events")]
+            if not u:
+                flash(f"No active CMI user with email {email}. Requesters appear after they sign in once.", "error")
+                return redirect(url_for("admin.form_notify", fid=form.id))
+            if not events:
+                flash("Tick at least one event for the new person.", "error")
+                return redirect(url_for("admin.form_notify", fid=form.id))
+            if any(s["user_id"] == u.id for s in subs):
+                flash(f"{u.name} is already on the list; change their ticks instead.", "info")
+            else:
+                subs.append({"user_id": u.id, "events": events})
+        form.notify = subs
+        db.session.commit()
+        flash("Notification list saved.", "success")
+        return redirect(url_for("admin.form_notify", fid=form.id))
+    users = {u.id: u for u in User.query.filter(User.id.in_([s["user_id"] for s in form.notify]))} if form.notify else {}
+    return render_template("admin_notify.html", form=form, users=users, EVENTS=EVENTS,
+                           candidates=User.live().filter_by(active=True).order_by(User.name).all())
 
 
 @bp.post("/forms/<int:fid>/delete")
@@ -364,7 +399,7 @@ def profile_edit(pid):
 @bp.get("/reports")
 def reports():
     need("report.view")
-    tickets = Ticket.query.all()  # ponytail: aggregates in Python; move to SQL GROUP BY if tickets reach ~50k
+    tickets = Ticket.live().all()  # ponytail: aggregates in Python; move to SQL GROUP BY if tickets reach ~50k
     today = date.today()
     open_ = [t for t in tickets if t.status not in ("Closed", "Rejected")]
     closed = [t for t in tickets if t.closed_at]
@@ -376,7 +411,7 @@ def reports():
         ("Closed, last 30 days", sum(1 for t in closed if t.closed_at >= utcnow() - timedelta(days=30)), None),
     ]
     rounds = defaultdict(list)
-    for a in TicketApproval.query:
+    for a in TicketApproval.query.join(Ticket).filter(Ticket.deleted_at.is_(None)):
         rounds[(a.ticket_id, a.round)].append(a)
     approval_hours = [(max(r.decided_at for r in rows if r.decided_at) - min(r.created_at for r in rows)).total_seconds() / 3600
                       for rows in rounds.values()

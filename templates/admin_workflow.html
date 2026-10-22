@@ -21,8 +21,8 @@
 {% block body %}
 <main class="page">
   {% include "_admin_nav.html" %}
-  <h1 class="title">{{ form.name }} · Workflow</h1>
-  <p class="subtitle">Stages run in order. Each stage needs one or all of its approvers. A stage with a condition only applies when the request's field has that value. <a href="{{ url_for('admin.form_edit', fid=form.id) }}">Edit form fields</a></p>
+  {% include "_form_tabs.html" %}
+  <p class="subtitle">Stages run in order. Each stage needs one or all of its approvers. A stage with a condition only applies when the request's field has that value.</p>
 
   <form method="post" data-rows>
     <input type="hidden" name="_csrf" value="{{ csrf }}">

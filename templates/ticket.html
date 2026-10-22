@@ -20,6 +20,11 @@
       <a class="btn transparent" href="{{ url_for('ticket_new', form=t.form_version.form.key, **{'from': t.id, 'link': 'follow_up_to'}) }}">Create Follow-up</a>
       <a class="btn transparent" href="{{ url_for('ticket_new', form=t.form_version.form.key, **{'from': t.id, 'link': 'child_of'}) }}">Create Child</a>
       {% endif %}
+      {% if g.user.can('ticket.delete') %}
+      <form method="post" action="{{ url_for('ticket_delete', tid=t.id) }}" class="inline"
+            data-confirm="Delete {{ t.number }}? It disappears from CMI for everyone (it stays in the database).">
+        <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn transparent reject" type="submit">Delete</button></form>
+      {% endif %}
     </div>
   </div>
   <dl class="kv">

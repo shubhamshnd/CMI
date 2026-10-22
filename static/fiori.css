@@ -225,6 +225,10 @@ code { font-family: Consolas, monospace; }
 .form-section { font-size: 16px; font-weight: 700; margin: 24px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
 .section-title { font-size: 18px; font-weight: 400; margin: 24px 0 12px; color: var(--shell-text); }
 .admin-nav { margin-bottom: 16px; }
+.form-tabs { margin: 8px 0 16px; }
+.center { text-align: center; }
+td.center input[type=checkbox] { width: auto; height: auto; }
+.add-row td { background: #f7f9fb; vertical-align: bottom; }
 
 /* Comment participants */
 .person { display: inline-flex; align-items: center; gap: 2px; margin: 4px 6px 0 0; padding: 2px 10px; border: 1px solid var(--border); border-radius: 12px; background: #f7f9fb; font-size: 13px; }
