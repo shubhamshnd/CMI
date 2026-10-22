@@ -3,6 +3,7 @@ import os
 import re
 import tempfile
 
+os.environ["CMI_ENV_FILE"] = os.devnull  # tests must not pick up this machine's .env (mail server, domains…)
 os.environ["CMI_DATABASE_URL"] = "sqlite://"
 os.environ["CMI_SEED_PASSWORD"] = "pw-test-123"
 os.environ["CMI_UPLOAD_DIR"] = tempfile.mkdtemp(prefix="cmi-test-uploads-")

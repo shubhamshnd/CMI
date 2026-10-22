@@ -14,7 +14,9 @@ waitress-serve --port 8080 app:app   # production
 
 `seed` prints the demo users' password (or uses `CMI_SEED_PASSWORD`). Change or deactivate the demo users before going live.
 
-## Settings (environment variables)
+## Settings
+
+Put settings in `.env` next to `app.py` (copy `.env.example`; it is loaded automatically by `flask`, `waitress-serve` and the app). Real environment variables override `.env`. Never commit `.env`.
 
 | Variable | Purpose |
 |---|---|

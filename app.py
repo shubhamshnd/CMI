@@ -17,6 +17,11 @@ import zipfile
 from datetime import date, datetime, timedelta
 
 import click
+from dotenv import load_dotenv
+
+# Settings live in .env next to this file (see .env.example). Real environment variables win over it.
+load_dotenv(os.environ.get("CMI_ENV_FILE") or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
 from flask import (Flask, Response, abort, flash, g, redirect, render_template, request, send_file, session,
                    url_for)
 from flask_migrate import Migrate
