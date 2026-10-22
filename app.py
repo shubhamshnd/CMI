@@ -3,7 +3,7 @@
 First run:  flask --app app db upgrade     (create / migrate the database)
             flask --app app seed           (permission profiles, demo forms, demo users)
 Dev:        flask --app app run --debug
-Production: waitress-serve --port 8080 app:app
+Production: python app.py                  (applies migrations, then serves with Waitress on CMI_HOST:CMI_PORT)
 """
 import csv
 import io
@@ -66,7 +66,8 @@ app.config.update(
 if "CMI_SECRET_KEY" not in os.environ:
     log.warning("CMI_SECRET_KEY not set: using a random key, sessions reset on restart.")
 db.init_app(app)
-Migrate(app, db, render_as_batch=True)  # batch mode: SQLite needs table rebuilds for ALTERs
+Migrate(app, db, render_as_batch=True,  # batch mode: SQLite needs table rebuilds for ALTERs
+        directory=os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations"))
 app.jinja_env.globals.update(STATUS_CLASS=STATUS_CLASS, PRIORITY_CLASS=PRIORITY_CLASS, PRIORITIES=PRIORITIES,
                              STATUSES=STATUSES, MANUAL_STATUSES=MANUAL_STATUSES, LINK_KINDS=LINK_KINDS,
                              PERMISSIONS=PERMISSIONS, show_value=show_value)
@@ -862,3 +863,23 @@ def restore_cmd(archive):
     db.engine.dispose()
     restore_from(archive, path, app.config["UPLOAD_DIR"])
     print(f"Restored {archive}.")
+
+
+if __name__ == "__main__":
+    # `python app.py`: bring the database up to date, then serve with Waitress (production WSGI server).
+    from flask_migrate import upgrade
+    from waitress import create_server
+
+    with app.app_context():
+        upgrade()
+    host, port = os.environ.get("CMI_HOST", "0.0.0.0"), int(os.environ.get("CMI_PORT", 8080))
+    try:
+        server = create_server(app, host=host, port=port, threads=8)
+    except OSError as e:
+        raise SystemExit(f"Cannot listen on {host}:{port} ({e.strerror}). Another program is probably using "
+                         f"port {port}: set CMI_PORT in .env to a free port.")
+    print(f"CMI is running on http://{'localhost' if host == '0.0.0.0' else host}:{port}  (Ctrl+C to stop)", flush=True)
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        print("CMI stopped.")

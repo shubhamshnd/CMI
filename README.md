@@ -6,10 +6,10 @@ Flask + SQLite portal for submitting, assigning, approving and tracking change r
 
 ```
 pip install -r requirements.txt
-flask --app app db upgrade        # create or migrate the database (instance/cmi.db)
+flask --app app db upgrade        # create the database (python app.py also does this)
 flask --app app seed              # permission profiles, demo forms/workflows, demo core users
 flask --app app run --debug       # development
-waitress-serve --port 8080 app:app   # production
+python app.py                     # production: applies migrations, then serves on CMI_HOST:CMI_PORT (default 8080)
 ```
 
 `seed` prints the demo users' password (or uses `CMI_SEED_PASSWORD`). Change or deactivate the demo users before going live.
