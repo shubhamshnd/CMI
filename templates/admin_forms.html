@@ -20,6 +20,9 @@
               <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn transparent" type="submit">Duplicate</button></form>
             <form method="post" action="{{ url_for('admin.form_archive', fid=f.id) }}" class="inline">
               <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn transparent" type="submit">{{ 'Restore' if f.archived else 'Archive' }}</button></form>
+            <form method="post" action="{{ url_for('admin.form_delete', fid=f.id) }}" class="inline"
+                  data-confirm="Delete the form “{{ f.name }}”? It disappears from CMI; existing tickets keep working.">
+              <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn transparent reject" type="submit">Delete</button></form>
           </td>
         </tr>
         {% else %}<tr><td colspan="5" class="empty">No forms yet.</td></tr>{% endfor %}

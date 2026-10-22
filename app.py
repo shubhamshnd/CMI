@@ -289,7 +289,7 @@ def csv_cell(v):
 
 @app.get("/")
 def home():
-    forms = Form.query.filter_by(archived=False).order_by(Form.name).all()
+    forms = Form.live().filter_by(archived=False).order_by(Form.name).all()
     return render_template("home.html", counts=counts(g.user), forms=[f for f in forms if f.latest])
 
 
@@ -340,15 +340,15 @@ def tickets():
                         headers={"Content-Disposition": f"attachment; filename=cmi-{tab}-{date.today()}.csv"})
     tabs = {k: v for k, v in TABS.items() if k != "all" or u.can("ticket.view")}
     return render_template("tickets.html", rows=rows, tab=tab, tabs=tabs, counts=counts(u),
-                           forms=Form.query.order_by(Form.name).all())
+                           forms=Form.live().order_by(Form.name).all())
 
 
 @app.route("/tickets/new", methods=["GET", "POST"])
 def ticket_new():
     need("ticket.create")
-    form = Form.query.filter_by(key=request.args.get("form", ""), archived=False).first()
+    form = Form.live().filter_by(key=request.args.get("form", ""), archived=False).first()
     if not form or not form.latest:
-        forms = Form.query.filter_by(archived=False).order_by(Form.name).all()
+        forms = Form.live().filter_by(archived=False).order_by(Form.name).all()
         return render_template("ticket_new.html", forms=[f for f in forms if f.latest])
     fv, errors = form.latest, {}
     source = get_ticket(request.args.get("from", type=int)) if request.args.get("from") else None

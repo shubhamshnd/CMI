@@ -16,7 +16,7 @@
     </div>
     <div class="actions">
       {% if can_edit_values %}<a class="btn" href="{{ url_for('ticket_edit', tid=t.id) }}">Edit</a>{% endif %}
-      {% if g.user.can('ticket.create') and not t.form_version.form.archived and t.form_version.form.latest %}
+      {% if g.user.can('ticket.create') and not t.form_version.form.archived and not t.form_version.form.deleted_at and t.form_version.form.latest %}
       <a class="btn transparent" href="{{ url_for('ticket_new', form=t.form_version.form.key, **{'from': t.id, 'link': 'follow_up_to'}) }}">Create Follow-up</a>
       <a class="btn transparent" href="{{ url_for('ticket_new', form=t.form_version.form.key, **{'from': t.id, 'link': 'child_of'}) }}">Create Child</a>
       {% endif %}

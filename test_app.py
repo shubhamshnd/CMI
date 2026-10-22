@@ -109,6 +109,30 @@ def test_deactivated_user_cannot_sign_in_and_last_manager_is_protected(mail):
         assert db.session.get(User, uid("admin@cmi.local")).can("user.manage")
 
 
+def test_soft_delete_hides_users_and_forms_but_keeps_records(mail):
+    admin = login("admin@cmi.local")
+    tid = create(admin)
+    with cmi.app.app_context():
+        from models import Form
+        fid = Form.query.filter_by(key="INFRA_CHANGE").one().id
+    # users
+    assert post(admin, f"/admin/users/{uid('admin@cmi.local')}/delete").location.endswith(f"/admin/users/{uid('admin@cmi.local')}")
+    eid = uid("engineer@cmi.local")
+    post(admin, f"/admin/users/{eid}/delete")
+    assert "engineer@cmi.local" not in admin.get("/admin/users").get_data(as_text=True)
+    assert admin.get(f"/admin/users/{eid}").status_code == 404
+    assert post(cmi.app.test_client(), "/login/core", email="engineer@cmi.local", password="pw-test-123").location.endswith("mode=core")
+    assert "Rohit Engineer" not in admin.get(f"/tickets/{tid}").get_data(as_text=True).split('id="assignee"')[1].split("</select>")[0]
+    # forms
+    post(admin, f"/admin/forms/{fid}/delete")
+    for page in ("/", "/tickets/new", "/admin/forms"):
+        assert "INFRA_CHANGE" not in admin.get(page).get_data(as_text=True), page  # key, not name: the flash says the name
+    assert admin.get(f"/admin/forms/{fid}").status_code == 404
+    assert "Upgrade core switch" in admin.get(f"/tickets/{tid}").get_data(as_text=True)  # old tickets still work
+    with cmi.app.app_context():  # rows are still in the database
+        assert db.session.get(User, eid).deleted_at and db.session.get(Form, fid).deleted_at
+
+
 # ---------------------------------------------------------------- forms
 
 def test_validate_rules_and_conditions():

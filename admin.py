@@ -86,7 +86,7 @@ def validate_schema(fields):
 def forms():
     need("form.publish")
     usage = Counter(fid for (fid,) in db.session.query(FormVersion.form_id).join(Ticket, Ticket.form_version_id == FormVersion.id))
-    return render_template("admin_forms.html", forms=Form.query.order_by(Form.archived, Form.name).all(), usage=usage)
+    return render_template("admin_forms.html", forms=Form.live().order_by(Form.archived, Form.name).all(), usage=usage)
 
 
 @bp.post("/forms/new")
@@ -96,8 +96,8 @@ def form_new():
     name = request.form.get("name", "").strip()[:120]
     if not FORM_KEY.match(key):
         flash("Key must start with a letter and use only A–Z, 0–9 and _ (e.g. ACCESS_CHANGE).", "error")
-    elif Form.query.filter_by(key=key).first():
-        flash(f"A form with key {key} already exists.", "error")
+    elif Form.query.filter_by(key=key).first():  # deleted forms keep their key
+        flash(f"A form with key {key} already exists (it may be a deleted form).", "error")
     elif not name:
         flash("Name is required.", "error")
     else:
@@ -111,7 +111,7 @@ def form_new():
 @bp.route("/forms/<int:fid>", methods=["GET", "POST"])
 def form_edit(fid):
     need("form.publish")
-    form = db.session.get(Form, fid) or abort(404)
+    form = Form.live().filter_by(id=fid).first_or_404()
     fields = form.draft["fields"]
     if request.method == "POST":
         fields, errors = parse_fields(request.form)
@@ -146,7 +146,7 @@ def form_edit(fid):
 @bp.get("/forms/<int:fid>/preview")
 def form_preview(fid):
     need("form.publish")
-    form = db.session.get(Form, fid) or abort(404)
+    form = Form.live().filter_by(id=fid).first_or_404()
     version = request.args.get("version", type=int)
     fv = next((v for v in form.versions if v.version == version), None) if version else None
     if version and not fv:
@@ -157,7 +157,7 @@ def form_preview(fid):
 @bp.post("/forms/<int:fid>/duplicate")
 def form_duplicate(fid):
     need("form.publish")
-    src = db.session.get(Form, fid) or abort(404)
+    src = Form.live().filter_by(id=fid).first_or_404()
     key, n = f"{src.key}_COPY"[:56], 1
     while Form.query.filter_by(key=key if n == 1 else f"{key}{n}").first():
         n += 1
@@ -172,17 +172,27 @@ def form_duplicate(fid):
 @bp.post("/forms/<int:fid>/archive")
 def form_archive(fid):
     need("form.publish")
-    form = db.session.get(Form, fid) or abort(404)
+    form = Form.live().filter_by(id=fid).first_or_404()
     form.archived = not form.archived
     db.session.commit()
     flash(f"{form.name} {'archived: hidden from the catalogue' if form.archived else 'restored to the catalogue'}.", "success")
     return redirect(url_for("admin.forms"))
 
 
+@bp.post("/forms/<int:fid>/delete")
+def form_delete(fid):
+    need("form.publish")
+    form = Form.live().filter_by(id=fid).first_or_404()
+    form.deleted_at = utcnow()  # soft delete: existing tickets keep working; restore in the DB
+    db.session.commit()
+    flash(f"Deleted {form.name}.", "success")
+    return redirect(url_for("admin.forms"))
+
+
 @bp.route("/forms/<int:fid>/workflow", methods=["GET", "POST"])
 def form_workflow(fid):
     need("form.publish")
-    form = db.session.get(Form, fid) or abort(404)
+    form = Form.live().filter_by(id=fid).first_or_404()
     schema_fields = {f["id"]: f for v in [*form.versions, None] for f in (v.schema if v else form.draft)["fields"]
                      if f["type"] not in ("file", "image", "section")}
     approvers = [u for u in User.query.filter_by(active=True).order_by(User.name) if u.can("ticket.approve")]
@@ -232,7 +242,7 @@ def managers_left():
 @bp.get("/users")
 def users():
     need("user.manage")
-    q = User.query
+    q = User.live()
     text = request.args.get("q", "").strip()
     if text:
         q = q.filter(User.name.ilike(f"%{text}%") | User.email.ilike(f"%{text}%"))
@@ -243,7 +253,7 @@ def users():
 @bp.route("/users/<int:uid>", methods=["GET", "POST"])
 def user_edit(uid=None):
     need("user.manage")
-    u = (db.session.get(User, uid) or abort(404)) if uid else User(is_core=True, active=True)
+    u = User.live().filter_by(id=uid).first_or_404() if uid else User(is_core=True, active=True)
     profiles = PermissionProfile.query.order_by(PermissionProfile.name).all()
     if request.method == "POST":
         errors = []
@@ -253,8 +263,8 @@ def user_edit(uid=None):
         if not name:
             errors.append("Name is required.")
         if not uid:
-            if "@" not in email or User.query.filter_by(email=email).first():
-                errors.append("Enter an email address that is not already in use.")
+            if "@" not in email or User.query.filter_by(email=email).first():  # includes deleted users
+                errors.append("Enter an email address that is not already in use (it may belong to a deleted user).")
             u.email = email
         if password and len(password) < MIN_PASSWORD:
             errors.append(f"Passwords need at least {MIN_PASSWORD} characters.")
@@ -284,6 +294,24 @@ def user_edit(uid=None):
               "success")
         return redirect(url_for("admin.users"))
     return render_template("admin_user_edit.html", u=u, profiles=profiles)
+
+
+@bp.post("/users/<int:uid>/delete")
+def user_delete(uid):
+    need("user.manage")
+    u = User.live().filter_by(id=uid).first_or_404()
+    if u.id == g.user.id:
+        flash("You cannot delete your own account.", "error")
+        return redirect(url_for("admin.user_edit", uid=uid))
+    u.deleted_at, u.active = utcnow(), False  # soft delete: cannot sign in, hidden everywhere; restore in the DB
+    db.session.flush()
+    if managers_left() == 0:
+        db.session.rollback()
+        flash("At least one active user must keep the user.manage permission.", "error")
+        return redirect(url_for("admin.user_edit", uid=uid))
+    db.session.commit()
+    flash(f"Deleted {u.name}.", "success")
+    return redirect(url_for("admin.users"))
 
 
 @bp.route("/profiles", methods=["GET", "POST"])

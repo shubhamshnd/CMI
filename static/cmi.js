@@ -43,3 +43,9 @@ document.querySelectorAll('[data-rows]').forEach(box => {
   box.addEventListener('change', e => { if (e.target.name === 'f_type') refreshTypeSettings(e.target.closest('.row')); });
   new MutationObserver(() => box.querySelectorAll('.row').forEach(refreshTypeSettings)).observe(box.querySelector('.rows'), {childList: true});
 });
+
+// Ask before destructive actions: <form data-confirm="Are you sure…?">
+document.addEventListener('submit', e => {
+  const msg = e.target.dataset.confirm;
+  if (msg && !confirm(msg)) e.preventDefault();
+});

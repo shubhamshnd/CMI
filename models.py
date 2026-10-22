@@ -59,7 +59,12 @@ class User(db.Model):
     failed_logins = db.Column(db.Integer, default=0, nullable=False)
     locked_until = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    deleted_at = db.Column(db.DateTime)  # soft delete: hidden everywhere; restore by clearing it (and setting active) in the DB
     profiles = db.relationship("PermissionProfile", secondary="user_profile", back_populates="users")
+
+    @classmethod
+    def live(cls):
+        return cls.query.filter(cls.deleted_at.is_(None))
 
     def can(self, perm):
         return any(perm in p.permissions for p in self.profiles)
@@ -108,7 +113,12 @@ class Form(db.Model):
     # Approval stages: [{"name", "mode": "any"|"all", "approvers": [user ids], "condition": {"field", "equals"} | None}]
     workflow = db.Column(db.JSON, default=list, nullable=False)
     default_assignee_id = db.Column(db.ForeignKey("user.id"))
+    deleted_at = db.Column(db.DateTime)  # soft delete: hidden everywhere; restore by clearing it in the DB
     versions = db.relationship("FormVersion", order_by="FormVersion.version", back_populates="form")
+
+    @classmethod
+    def live(cls):
+        return cls.query.filter(cls.deleted_at.is_(None))
     default_assignee = db.relationship("User")
 
     @property
