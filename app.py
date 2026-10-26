@@ -142,6 +142,8 @@ def start_session(user):
 
 @app.get("/login")
 def login():
+    if g.user:  # already signed in (back button, bookmark): go home instead of showing the form again
+        return redirect(url_for("home"))
     if request.args.get("reset"):
         session.pop("otp_email", None)
     return render_template("login.html", mode=request.args.get("mode", "otp"), otp_email=session.get("otp_email"))

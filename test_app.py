@@ -78,6 +78,13 @@ def test_post_without_csrf_rejected(mail):
     assert cmi.app.test_client().post("/login/core", data={"email": "x"}).status_code == 400
 
 
+def test_signed_in_user_is_sent_home_from_login_page(mail):
+    admin = login("admin@cmi.local")
+    for url in ("/login", "/login?mode=core", "/login?reset=1"):
+        assert admin.get(url).location == "/", url
+    assert cmi.app.test_client().get("/login").status_code == 200  # signed-out users still see the form
+
+
 def test_otp_login_is_single_use(mail):
     c = cmi.app.test_client()
     post(c, "/login/otp/send", email="Req@Corp.com")
