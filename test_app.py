@@ -115,11 +115,18 @@ def test_test_mode_never_opens_smtp(monkeypatch):
         core.send_mail("x@jsw.in", "subject", "body")  # printed to the console instead
 
 
-def test_core_user_cannot_use_otp(mail):
+def test_core_user_can_sign_in_with_code_but_test_mode_hides_it(mail, monkeypatch):
     c = cmi.app.test_client()
     post(c, "/login/otp/send", email="admin@cmi.local")
     code = re.search(r"\b(\d{6})\b", mail[-1][2]).group(1)
-    assert post(c, "/login/otp/verify", code=code).location == "/login"
+    assert post(c, "/login/otp/verify", code=code).location == "/"
+    assert c.get("/admin/users").status_code == 200  # same rights as with the password
+    monkeypatch.setitem(cmi.app.config, "SHOW_OTP", True)
+    c = cmi.app.test_client()
+    post(c, "/login/otp/send", email="lead@cmi.local")
+    code = re.search(r"\b(\d{6})\b", mail[-1][2]).group(1)
+    page = c.get("/login").get_data(as_text=True)
+    assert code not in page and "not shown here" in page
 
 
 def test_deactivated_user_cannot_sign_in_and_last_manager_is_protected(mail):

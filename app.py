@@ -162,7 +162,11 @@ def otp_send():
         db.session.add(OtpChallenge(email=email, code_hash=generate_password_hash(code), expires_at=utcnow() + OTP_TTL))
         db.session.commit()
         core.send_mail(email, "Your CMI sign-in code", f"Your CMI sign-in code is {code}. It expires in 5 minutes.")
-        if app.config["SHOW_OTP"]:
+        if app.config["SHOW_OTP"] and User.query.filter_by(email=email, is_core=True).first():
+            # never put a core user's code on screen: anyone could then sign in as an admin
+            flash("Testing mode: codes for core users are not shown here. It is in the server console, "
+                  "or use the Password tab.", "warning")
+        elif app.config["SHOW_OTP"]:
             flash(f"Testing mode (CMI_SHOW_OTP): your code is {code}. No email was sent.", "warning")
         else:
             flash(f"We sent a 6-digit code to {email}.", "success")
@@ -190,8 +194,8 @@ def otp_verify():
         user.profiles = [requester] if requester else []
         db.session.add(user)
     db.session.commit()
-    if not user.active or user.is_core:
-        flash("This account cannot sign in with an email code." if user.active else "This account is deactivated.", "error")
+    if not user.active:  # core users may use a code too, as well as their password
+        flash("This account is deactivated.", "error")
         return redirect(url_for("login"))
     return start_session(user)
 

@@ -8,8 +8,8 @@
     <h1>Sign In</h1>
     <p class="subtitle">Change Management Interface</p>
     <nav class="tabs">
-      <a href="{{ url_for('login') }}" {% if mode != 'core' %}aria-current="page"{% endif %}>Requester</a>
-      <a href="{{ url_for('login', mode='core') }}" {% if mode == 'core' %}aria-current="page"{% endif %}>Core User</a>
+      <a href="{{ url_for('login') }}" {% if mode != 'core' %}aria-current="page"{% endif %}>Email Code</a>
+      <a href="{{ url_for('login', mode='core') }}" {% if mode == 'core' %}aria-current="page"{% endif %}>Password</a>
     </nav>
 
     {% if mode == 'core' %}
