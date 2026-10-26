@@ -913,7 +913,7 @@ if __name__ == "__main__":
 
     with app.app_context():
         upgrade()
-    host, port = os.environ.get("CMI_HOST", "0.0.0.0"), int(os.environ.get("CMI_PORT", 8080))
+    host, port = os.environ.get("CMI_HOST", "0.0.0.0"), int(os.environ.get("CMI_PORT", 5001))
     import socket
     with socket.socket() as probe:  # Windows lets two servers bind one port; refuse instead of silently sharing it
         if probe.connect_ex(("127.0.0.1" if host == "0.0.0.0" else host, port)) == 0:
