@@ -12,7 +12,14 @@
       <a href="{{ url_for('login', mode='core') }}" {% if mode == 'core' %}aria-current="page"{% endif %}>Password</a>
     </nav>
 
-    {% if mode == 'core' %}
+    {% if g.user %}
+    <div class="msg info">You're signed in as <b>{{ g.user.name }}</b> ({{ g.user.email }}).</div>
+    <div class="actions">
+      <a class="btn transparent" href="{{ url_for('logout') }}">Sign out</a>
+      <a class="btn emph" href="{{ url_for('home') }}">Continue to CMI</a>
+    </div>
+
+    {% elif mode == 'core' %}
     <form method="post" action="{{ url_for('core_login') }}">
       <input type="hidden" name="_csrf" value="{{ csrf }}">
       <div class="field"><label for="email">Email</label>

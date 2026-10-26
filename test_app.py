@@ -78,11 +78,20 @@ def test_post_without_csrf_rejected(mail):
     assert cmi.app.test_client().post("/login/core", data={"email": "x"}).status_code == 400
 
 
-def test_signed_in_user_is_sent_home_from_login_page(mail):
+def test_login_page_never_redirects_and_offers_continue_when_signed_in(mail):
     admin = login("admin@cmi.local")
     for url in ("/login", "/login?mode=core", "/login?reset=1"):
-        assert admin.get(url).location == "/", url
-    assert cmi.app.test_client().get("/login").status_code == 200  # signed-out users still see the form
+        r = admin.get(url)
+        assert r.status_code == 200 and "Continue to CMI" in r.get_data(as_text=True), url
+    assert admin.get("/").status_code == 200
+    page = cmi.app.test_client().get("/login").get_data(as_text=True)
+    assert "Send Code" in page and "Continue to CMI" not in page  # signed-out users get the form
+
+
+def test_session_cookie_has_its_own_name(mail):
+    c = cmi.app.test_client()
+    post(c, "/login/core", email="admin@cmi.local", password="pw-test-123")
+    assert c.get_cookie("cmi_session") is not None and c.get_cookie("session") is None
 
 
 def test_otp_login_is_single_use(mail):

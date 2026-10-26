@@ -50,7 +50,8 @@ log = logging.getLogger("cmi")
 # otherwise put it under whatever directory the command was started from.
 app = Flask(__name__, instance_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "instance"))
 app.config.update(
-    SECRET_KEY=os.environ.get("CMI_SECRET_KEY") or secrets.token_hex(32),
+    SECRET_KEY=os.environ.get("CMI_SECRET_KEY") or None,  # fallback below: a key saved in instance/
+    SESSION_COOKIE_NAME="cmi_session",  # cookies are shared across ports on one host: don't clash with other apps' "session"
     SQLALCHEMY_DATABASE_URI=os.environ.get("CMI_DATABASE_URL", "sqlite:///cmi.db"),
     UPLOAD_DIR=os.environ.get("CMI_UPLOAD_DIR") or os.path.join(app.instance_path, "uploads"),
     MAX_CONTENT_LENGTH=60 * core.MB,
@@ -66,8 +67,16 @@ app.config.update(
     MAIL_FROM=os.environ.get("CMI_MAIL_FROM", "cmi@localhost"),
     SHOW_OTP=os.environ.get("CMI_SHOW_OTP") == "1",  # testing only: sign-in codes are shown on the login page
 )
-if "CMI_SECRET_KEY" not in os.environ:
-    log.warning("CMI_SECRET_KEY not set: using a random key, sessions reset on restart.")
+if not app.config["SECRET_KEY"]:
+    # No key in .env: generate one once and keep it, so restarts and every running copy accept the same sessions.
+    key_file = os.path.join(app.instance_path, "secret_key")
+    os.makedirs(app.instance_path, exist_ok=True)
+    if not os.path.exists(key_file):
+        with open(key_file, "w") as fh:
+            fh.write(secrets.token_hex(32))
+    with open(key_file) as fh:
+        app.config["SECRET_KEY"] = fh.read().strip()
+    log.warning("CMI_SECRET_KEY not set in .env: using the key saved in %s.", key_file)
 if app.config["SHOW_OTP"]:
     log.warning("CMI_SHOW_OTP=1: sign-in codes are shown on screen and NO email is sent (all mail goes to this console). "
                 "Anyone can sign in as any requester. Turn off before going live.")
@@ -142,8 +151,7 @@ def start_session(user):
 
 @app.get("/login")
 def login():
-    if g.user:  # already signed in (back button, bookmark): go home instead of showing the form again
-        return redirect(url_for("home"))
+    # Signed-in users see "continue / sign out" here (login.html). No redirect, so this page can never loop.
     if request.args.get("reset"):
         session.pop("otp_email", None)
     return render_template("login.html", mode=request.args.get("mode", "otp"), otp_email=session.get("otp_email"))
