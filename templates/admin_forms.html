@@ -11,7 +11,8 @@
       <tbody>
         {% for f in forms %}
         <tr>
-          <td><a href="{{ url_for('admin.form_edit', fid=f.id) }}">{{ f.name }}</a><span class="sub">{{ f.key }}{% if f.archived %} · archived{% endif %}</span></td>
+          <td><a href="{{ url_for('admin.form_edit', fid=f.id) }}">{{ f.name }}</a><span class="sub">{{ f.key }}{% if f.archived %} · archived{% endif %}</span>
+            {% if f.latest and not f.archived %}<span class="sub" title="Share this link in other applications">Link: <code>{{ url_for('ticket_new', form=f.key, _external=True) }}</code></span>{% endif %}</td>
           <td>{{ 'v' ~ f.latest.version if f.latest else 'Not published' }}{% if f.latest and f.has_unpublished_changes %}<span class="sub status critical">Unpublished changes</span>{% endif %}</td>
           <td><a href="{{ url_for('admin.form_workflow', fid=f.id) }}">{{ f.workflow|length }} stage(s)</a>
             <span class="sub"><a href="{{ url_for('admin.form_notify', fid=f.id) }}">{{ f.notify|length }} notified</a></span></td>

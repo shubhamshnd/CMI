@@ -101,6 +101,8 @@ def guard():
         session.clear()
         g.user = None
     if not g.user and request.endpoint not in PUBLIC_ENDPOINTS:
+        if request.method == "GET":  # deep links (e.g. a form link in another app) resume here after sign-in
+            session["next"] = request.full_path.rstrip("?")
         return redirect(url_for("login"))
 
 
@@ -143,10 +145,12 @@ def fmt_d(value):
 # ---------------------------------------------------------------- auth
 
 def start_session(user):
+    # "next" is only ever set by guard() from this app's own request path, so it can't be an open redirect
+    nxt = session.get("next", "")
     session.clear()  # fresh session contents on login: no fixation, new CSRF token
     session.permanent = True
     session["uid"] = user.id
-    return redirect(url_for("home"))
+    return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for("home"))
 
 
 @app.get("/login")
@@ -312,6 +316,7 @@ def csv_cell(v):
 # ---------------------------------------------------------------- pages
 
 @app.get("/")
+@app.get("/home")  # registered first, so url_for("home") builds /home: the site's nginx redirects a bare "/" to /login
 def home():
     forms = Form.live().filter_by(archived=False).order_by(Form.name).all()
     return render_template("home.html", counts=counts(g.user), forms=[f for f in forms if f.latest])

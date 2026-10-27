@@ -40,7 +40,7 @@ def post(client, url, **data):
 def login(email):
     c = cmi.app.test_client()
     r = post(c, "/login/core", email=email, password="pw-test-123")
-    assert r.status_code == 302 and r.location == "/", f"login failed for {email}"
+    assert r.status_code == 302 and r.location == "/home", f"login failed for {email}"
     return c
 
 
@@ -48,7 +48,7 @@ def requester(mail, email="req@corp.com"):
     c = cmi.app.test_client()
     post(c, "/login/otp/send", email=email)
     code = re.search(r"\b(\d{6})\b", mail[-1][2]).group(1)
-    assert post(c, "/login/otp/verify", code=code).location == "/"
+    assert post(c, "/login/otp/verify", code=code).location == "/home"
     return c
 
 
@@ -88,6 +88,24 @@ def test_login_page_never_redirects_and_offers_continue_when_signed_in(mail):
     assert "Send Code" in page and "Continue to CMI" not in page  # signed-out users get the form
 
 
+def test_home_lives_at_slash_home_and_slash_still_works(mail):
+    admin = login("admin@cmi.local")  # login() already checks the post-login redirect goes to /home
+    assert admin.get("/home").status_code == 200 and admin.get("/").status_code == 200
+    page = admin.get("/login").get_data(as_text=True)
+    assert 'href="/home"' in page  # "Continue to CMI" avoids the bare "/"
+
+
+def test_form_link_survives_otp_login(mail):
+    c = cmi.app.test_client()
+    assert c.get("/tickets/new?form=INFRA_CHANGE").location == "/login"
+    post(c, "/login/otp/send", email="req@corp.com")
+    code = re.search(r"\b(\d{6})\b", mail[-1][2]).group(1)
+    assert post(c, "/login/otp/verify", code=code).location == "/tickets/new?form=INFRA_CHANGE"
+    assert c.get("/tickets/new?form=INFRA_CHANGE").status_code == 200
+    c.get("/logout")
+    assert post(c, "/login/core", email="admin@cmi.local", password="pw-test-123").location == "/home"  # used once
+
+
 def test_session_cookie_has_its_own_name(mail):
     c = cmi.app.test_client()
     post(c, "/login/core", email="admin@cmi.local", password="pw-test-123")
@@ -99,7 +117,7 @@ def test_otp_login_is_single_use(mail):
     post(c, "/login/otp/send", email="Req@Corp.com")
     code = re.search(r"\b(\d{6})\b", mail[-1][2]).group(1)
     assert post(c, "/login/otp/verify", code="000000" if code != "000000" else "111111").location == "/login"
-    assert post(c, "/login/otp/verify", code=code).location == "/"
+    assert post(c, "/login/otp/verify", code=code).location == "/home"
     assert c.get("/").status_code == 200
     c2 = cmi.app.test_client()
     with c2.session_transaction() as s:
@@ -118,7 +136,7 @@ def test_show_otp_toggle_puts_code_on_screen_only_when_on(mail, monkeypatch):
     code = re.search(r"\b(\d{6})\b", mail[-1][2]).group(1)
     page = c.get("/login").get_data(as_text=True)
     assert f"your code is {code}" in page and "Testing mode" in page
-    assert post(c, "/login/otp/verify", code=code).location == "/"
+    assert post(c, "/login/otp/verify", code=code).location == "/home"
 
 
 def test_test_mode_never_opens_smtp(monkeypatch):
@@ -135,7 +153,7 @@ def test_core_user_can_sign_in_with_code_but_test_mode_hides_it(mail, monkeypatc
     c = cmi.app.test_client()
     post(c, "/login/otp/send", email="admin@cmi.local")
     code = re.search(r"\b(\d{6})\b", mail[-1][2]).group(1)
-    assert post(c, "/login/otp/verify", code=code).location == "/"
+    assert post(c, "/login/otp/verify", code=code).location == "/home"
     assert c.get("/admin/users").status_code == 200  # same rights as with the password
     monkeypatch.setitem(cmi.app.config, "SHOW_OTP", True)
     c = cmi.app.test_client()
