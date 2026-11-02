@@ -32,7 +32,12 @@
     <div><dt>Priority</dt><dd>{{ priority(t.priority) }}
       {% for r in t.open_priority_requests %}<span class="sub muted">Requested from {{ r.requested_to.name }}</span>{% endfor %}</dd></div>
     <div><dt>Requester</dt><dd>{{ t.requester.name }}</dd></div>
-    <div><dt>Assignee</dt><dd>{{ t.assignee.name if t.assignee else 'Unassigned' }}</dd></div>
+    <div><dt>Group</dt><dd>{{ t.group.name if t.group else '—' }}</dd></div>
+    <div><dt>Assignee</dt><dd>{{ t.assignee.name if t.assignee else 'Unassigned' }}
+      {% if t.group and g.user in t.group.members and not t.assignee and t.status not in ('Closed', 'Rejected') %}
+      <form method="post" action="{{ url_for('ticket_take', tid=t.id) }}" class="inline">
+        <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="rv" value="{{ t.row_version }}">
+        <button class="btn" type="submit">Take it</button></form>{% endif %}</dd></div>
     <div><dt>Due Date</dt><dd>{{ t.due_date|d }}</dd></div>
     <div><dt>Created</dt><dd>{{ t.created_at|dt }}</dd></div>
   </dl>
@@ -80,6 +85,9 @@
       <form class="panel pad" method="post" action="{{ url_for('ticket_assign', tid=t.id) }}">
         <h3>Assignment</h3>
         <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="rv" value="{{ t.row_version }}">
+        <div class="field"><label for="group">Support Group</label>
+          <select id="group" name="group_id"><option value="">None</option>
+            {% for gr in groups %}<option value="{{ gr.id }}" {% if gr.id == t.group_id %}selected{% endif %}>{{ gr.name }}</option>{% endfor %}</select></div>
         <div class="field"><label for="assignee">Assignee</label>
           <select id="assignee" name="assignee_id"><option value="">Unassigned</option>
             {% for u in core_users %}<option value="{{ u.id }}" {% if u.id == t.assignee_id %}selected{% endif %}>{{ u.name }}</option>{% endfor %}</select></div>
@@ -166,7 +174,12 @@
           {% for a in rows %}
           <tr>
             <td>{{ a.stage_index + 1 }} · {{ a.stage_name }}<span class="sub">{{ 'one approver needed' if a.mode == 'any' else 'all approvers needed' }}</span></td>
-            <td>{{ a.approver.name }}</td>
+            <td>{{ a.approver.name }}{% if a.via_email %}<span class="sub">{{ a.approver.email }} · by email link</span>
+              {% if a in current and not a.decision and (g.user.id == t.requester_id or g.user.can('ticket.assign')) %}
+              <form method="post" action="{{ url_for('approval_resend', tid=t.id, aid=a.id) }}">
+                <input type="hidden" name="_csrf" value="{{ csrf }}">
+                <button class="btn transparent" type="submit" title="Sent {{ a.link_sent_at|dt }}">Resend link</button></form>
+              {% endif %}{% endif %}</td>
             <td>{% if a.decision == 'approved' %}<span class="status positive">Approved</span>
               {% elif a.decision == 'rejected' %}<span class="status negative">Rejected</span>
               {% elif a.decision == 'returned' %}<span class="status critical">Returned</span>

@@ -45,10 +45,11 @@
     <div class="hint">{{ (accept or ['pdf, images, office files, txt, csv, zip'])|join(', ') }} · up to {{ f.max_mb or 10 }} MB each, {{ f.max_count or 5 }} files</div>
     {% else %}
     <input id="f-{{ f.id }}" name="{{ f.id }}" value="{{ data.get(f.id, '') }}" {% if err %}aria-invalid="true"{% endif %} {% if f.required %}required{% endif %}
-      type="{{ {'number': 'number', 'date': 'date', 'datetime': 'datetime-local'}.get(f.type, 'text') }}"
+      type="{{ {'number': 'number', 'date': 'date', 'datetime': 'datetime-local', 'approver_email': 'email'}.get(f.type, 'text') }}"
       {% if f.type == 'number' %}step="any"{% endif %}
       {% if f.min is defined %}min="{{ f.min }}"{% endif %} {% if f.max is defined %}max="{{ f.max }}"{% endif %}
       {% if f.max_length %}maxlength="{{ f.max_length }}"{% endif %}>
+    {% if f.type == 'approver_email' %}<div class="hint">This person gets an email link to approve.{% if g.user and data.get(f.id) == g.user.hod_email %} Remembered from your last request; change it if your HOD has changed.{% endif %}</div>{% endif %}
     {% endif %}
     {% endif %}
     {% if err %}<div class="field-error">{{ err }}</div>{% endif %}

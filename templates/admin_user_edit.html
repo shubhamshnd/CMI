@@ -10,6 +10,9 @@
     <div class="field"><label for="name" class="req">Name</label><input id="name" name="name" value="{{ u.name or '' }}" maxlength="120" required></div>
     <div class="field"><label for="email" class="req">Email</label>
       <input id="email" name="email" type="email" value="{{ u.email or '' }}" {% if u.id %}disabled{% else %}required{% endif %}></div>
+    <div class="field"><label for="hod_email">HOD email</label>
+      <input id="hod_email" name="hod_email" type="email" value="{{ u.hod_email or '' }}">
+      <div class="hint">Pre-filled as the approver on this user's requests. Updated automatically when they enter a different HOD.</div></div>
     <div class="field">
       <label class="check"><input type="checkbox" name="is_core" {% if u.is_core %}checked{% endif %}> Core user (signs in with a password)</label>
       {% if u.id %}<label class="check"><input type="checkbox" name="active" {% if u.active %}checked{% endif %}> Active (can sign in)</label>{% endif %}

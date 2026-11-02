@@ -16,6 +16,7 @@
   <div class="home-kpis">
     {% if g.user.is_core %}
     {{ kpi(counts.assigned, 'Assigned to me', url_for('tickets', tab='assigned', open=1)) }}
+    {% if counts.group is not none %}{{ kpi(counts.group, "In my groups' queue", url_for('tickets', tab='group')) }}{% endif %}
     {{ kpi(counts.approvals, 'Waiting for my approval', url_for('tickets', tab='approvals')) }}
     {% if counts.overdue is not none %}{{ kpi(counts.overdue, 'Overdue', url_for('tickets', tab='all', overdue=1), alert=True) }}{% endif %}
     {% endif %}
@@ -48,6 +49,7 @@
       <li><a href="{{ url_for('tickets', tab='mine') }}">My Tickets</a><span class="count">({{ counts.mine }})</span></li>
       {% if g.user.is_core %}
       <li><a href="{{ url_for('tickets', tab='assigned') }}">Assigned to Me</a><span class="count">({{ counts.assigned }})</span></li>
+      {% if counts.group is not none %}<li><a href="{{ url_for('tickets', tab='group') }}">My Groups' Queue</a><span class="count">({{ counts.group }})</span></li>{% endif %}
       <li><a href="{{ url_for('tickets', tab='priority') }}">Priority Requests</a><span class="count">({{ counts.priority }})</span></li>
       {% endif %}
       <li><a href="{{ url_for('tickets', tab='approvals') }}">Pending My Approval</a><span class="count">({{ counts.approvals }})</span></li>
@@ -62,6 +64,7 @@
       {% endif %}
       {% if g.user.can('user.manage') %}
       <li><a href="{{ url_for('admin.users') }}">Users</a></li>
+      <li><a href="{{ url_for('admin.groups') }}">Support Groups</a></li>
       <li><a href="{{ url_for('admin.profiles') }}">Permission Profiles</a></li>
       {% endif %}
     {% endcall %}

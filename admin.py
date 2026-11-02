@@ -10,9 +10,9 @@ from types import SimpleNamespace
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
 from werkzeug.security import generate_password_hash
 
-from core import EVENTS, FILE_TYPES, MIN_PASSWORD, need
+from core import EMAIL, EVENTS, FILE_TYPES, MIN_PASSWORD, need
 from models import (FIELD_TYPES, PERMISSIONS, SECTION_COLORS, SECTION_ICONS, Form, FormVersion, PermissionProfile,
-                    Section, Ticket, TicketApproval, User, db, utcnow)
+                    Section, SupportGroup, Ticket, TicketApproval, User, db, utcnow)
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -250,32 +250,45 @@ def form_workflow(fid):
                      if f["type"] not in ("file", "image", "section")}
     approvers = [u for u in User.query.filter_by(active=True).order_by(User.name) if u.can("ticket.approve")]
     core_users = User.query.filter_by(is_core=True, active=True).order_by(User.name).all()
+    email_fields = {fid: f for fid, f in schema_fields.items() if f["type"] == "approver_email"}
+    groups = SupportGroup.query.order_by(SupportGroup.name).all()
     if request.method == "POST":
         by_email = {u.email: u for u in approvers}
-        cols = {k: request.form.getlist("s_" + k) for k in ("name", "mode", "approvers", "cond_field", "cond_value")}
+        cols = {k: request.form.getlist("s_" + k) for k in ("name", "mode", "approvers", "field", "cond_field", "cond_value")}
         stages, errors = [], []
         for i in range(len(cols["name"])):
-            v = {k: cols[k][i].strip() for k in cols}
+            v = {k: (cols[k][i].strip() if i < len(cols[k]) else "") for k in cols}
             emails = [e.lower() for e in re.split(r"[,\s;]+", v["approvers"]) if e]
             unknown = [e for e in emails if e not in by_email]
             if not v["name"]:
                 errors.append(f"Stage {i + 1}: name is required.")
-            if not emails or unknown:
+            if v["field"]:  # approver named on the request (e.g. HOD email); listed approvers are not used
+                if v["field"] not in email_fields:
+                    errors.append(f"Stage {i + 1}: choose an “approver email” field of this form.")
+                emails = []
+            elif not emails or unknown:
                 errors.append(f"Stage {i + 1}: approvers must be active users with approval permission"
                               + (f" (not: {', '.join(unknown)})." if unknown else "."))
             if v["cond_field"] and (v["cond_field"] not in schema_fields or not v["cond_value"]):
                 errors.append(f"Stage {i + 1}: condition needs a form field and a value.")
-            stages.append({"name": v["name"][:120], "mode": "all" if v["mode"] == "all" else "any",
-                           "approvers": list(dict.fromkeys(by_email[e].id for e in emails if e in by_email)),
-                           "condition": {"field": v["cond_field"], "equals": v["cond_value"]} if v["cond_field"] else None})
+            stage = {"name": v["name"][:120], "mode": "all" if v["mode"] == "all" else "any",
+                     "approvers": list(dict.fromkeys(by_email[e].id for e in emails if e in by_email)),
+                     "condition": {"field": v["cond_field"], "equals": v["cond_value"]} if v["cond_field"] else None}
+            if v["field"]:
+                stage["approver_field"] = v["field"]
+            stages.append(stage)
         da = request.form.get("default_assignee_id", type=int)
         if da and da not in {u.id for u in core_users}:
             errors.append("Default assignee must be an active core user.")
+        dg = request.form.get("default_group_id", type=int)
+        if dg and dg not in {gr.id for gr in groups}:
+            errors.append("Choose an existing support group.")
         if errors:
             for e in errors:
                 flash(e, "error")
         else:
-            form.workflow, form.default_assignee_id = stages, da
+            form.workflow, form.default_assignee_id, form.default_group_id = stages, da, dg
+            form.auto_submit = "auto_submit" in request.form
             db.session.commit()
             flash("Workflow saved. It applies to requests submitted for approval from now on.", "success")
             return redirect(url_for("admin.form_workflow", fid=form.id))
@@ -283,7 +296,8 @@ def form_workflow(fid):
         stages = form.workflow
     names = {u.id: u.email for u in User.query}
     return render_template("admin_workflow.html", form=form, stages=stages, schema_fields=schema_fields,
-                           approvers=approvers, core_users=core_users, names=names)
+                           approvers=approvers, core_users=core_users, names=names, email_fields=email_fields,
+                           groups=groups)
 
 
 # ---------------------------------------------------------------- sections
@@ -341,6 +355,44 @@ def section_edit(sid=None):
 
 # ---------------------------------------------------------------- users & profiles
 
+@bp.get("/groups")
+def groups():
+    need("user.manage")
+    return render_template("admin_groups.html", groups=SupportGroup.query.order_by(SupportGroup.name).all())
+
+
+@bp.route("/groups/new", methods=["GET", "POST"])
+@bp.route("/groups/<int:gid>", methods=["GET", "POST"])
+def group_edit(gid=None):
+    """A support group: its members share a queue and are emailed when a ticket lands in it."""
+    need("user.manage")
+    grp = (db.session.get(SupportGroup, gid) or abort(404)) if gid else SupportGroup()
+    core_users = User.live().filter_by(is_core=True, active=True).order_by(User.name).all()
+    if request.method == "POST":
+        if request.form.get("action") == "delete":
+            if Ticket.query.filter_by(group_id=grp.id).first():
+                flash("Tickets are in this group's queue, so it cannot be deleted. Remove its members instead.", "error")
+                return redirect(url_for("admin.group_edit", gid=grp.id))
+            Form.query.filter_by(default_group_id=grp.id).update({"default_group_id": None})
+            db.session.delete(grp)
+            db.session.commit()
+            flash("Group deleted.", "success")
+            return redirect(url_for("admin.groups"))
+        name = request.form.get("name", "").strip()[:80]
+        if not name or SupportGroup.query.filter(SupportGroup.name == name, SupportGroup.id != (grp.id or 0)).first():
+            flash("Enter a group name that is not already in use.", "error")
+            return render_template("admin_group_edit.html", grp=grp, core_users=core_users), 400
+        chosen = set(request.form.getlist("members", type=int))
+        grp.name, grp.description = name, request.form.get("description", "").strip()[:255]
+        # core users only; members who are no longer core/active stay until removed by hand
+        grp.members = [u for u in core_users if u.id in chosen] + [u for u in grp.members if u not in core_users and u.id in chosen]
+        db.session.add(grp)
+        db.session.commit()
+        flash(f"Saved {grp.name}.", "success")
+        return redirect(url_for("admin.groups"))
+    return render_template("admin_group_edit.html", grp=grp, core_users=core_users)
+
+
 def managers_left():
     return sum(1 for u in User.query.filter_by(active=True) if u.can("user.manage"))
 
@@ -374,11 +426,15 @@ def user_edit(uid=None):
             u.email = email
         if password and len(password) < MIN_PASSWORD:
             errors.append(f"Passwords need at least {MIN_PASSWORD} characters.")
+        hod = request.form.get("hod_email", "").strip().lower()
+        if hod and (not EMAIL.match(hod) or hod == u.email):
+            errors.append("HOD email must be a valid address other than the user's own.")
         if errors:
             for e in errors:
                 flash(e, "error")
             return render_template("admin_user_edit.html", u=u, profiles=profiles), 400
         u.name = name
+        u.hod_email = hod or None
         u.is_core = "is_core" in request.form
         u.active = "active" in request.form or not uid
         chosen = set(request.form.getlist("profiles", type=int))
@@ -495,6 +551,7 @@ def reports():
         "Open by section": Counter(t.section.name if t.section else "No section" for t in open_),
         "Open by form": Counter(t.form_version.form.name for t in open_),
         "Open by priority": Counter(t.priority or "Not set" for t in open_),
+        "Open by support group": Counter(t.group.name if t.group else "No group" for t in open_),
         "Open by assignee": Counter(t.assignee.name if t.assignee else "Unassigned" for t in open_),
         "All by status": Counter(t.status for t in tickets),
     }

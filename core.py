@@ -2,6 +2,7 @@
 import logging
 import mimetypes
 import os
+import re
 import smtplib
 import uuid
 from datetime import date, datetime
@@ -10,7 +11,7 @@ from email.message import EmailMessage
 from flask import abort, current_app, g
 from werkzeug.datastructures import MultiDict
 
-from models import Attachment, TicketHistory, User, db, utcnow
+from models import Attachment, PermissionProfile, TicketHistory, User, db, utcnow
 
 log = logging.getLogger("cmi")
 
@@ -22,6 +23,7 @@ MANUAL_STATUSES = ["New", "In Progress", "Closed"]
 
 MIN_PASSWORD = 10
 MB = 1024 * 1024
+EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 IMAGE_TYPES = ["png", "jpg", "jpeg", "webp"]
 FILE_TYPES = ["pdf", "png", "jpg", "jpeg", "webp", "txt", "csv", "docx", "xlsx", "pptx", "zip"]  # upload allowlist
 _SIGNATURES = {"png": b"\x89PNG\r\n\x1a\n", "jpg": b"\xff\xd8\xff", "jpeg": b"\xff\xd8\xff", "pdf": b"%PDF-",
@@ -72,6 +74,24 @@ def notify(users, subject, body, skip=()):
             log.exception("notification to %s failed", u.email)
 
 
+def user_for_email(email):
+    """The CMI user with this email, created as a requester if they have never signed in (like an email-code sign-in).
+    May return an inactive or deleted user: callers decide what that means."""
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        requester = PermissionProfile.query.filter_by(name="Requester").first()
+        user = User(email=email, name=email.split("@")[0], active=True,  # column default only applies at flush
+                    profiles=[requester] if requester else [])
+        db.session.add(user)
+    return user
+
+
+def check_domain(email):
+    domains = current_app.config["ALLOWED_EMAIL_DOMAINS"]
+    if domains and email.rsplit("@", 1)[1] not in domains:
+        raise Invalid("Use a company email address (@" + ", @".join(domains) + ").")
+
+
 # ---------------------------------------------------------------- permissions
 
 def need(perm):
@@ -85,6 +105,7 @@ def asked_for_priority(user, t):
 
 def can_view(user, t):
     return (user.can("ticket.view") or user.id in (t.requester_id, t.assignee_id) or user in t.watchers
+            or (t.group and user in t.group.members)
             or asked_for_priority(user, t) or any(a.approver_id == user.id for a in t.approvals)
             or any(s["user_id"] == user.id for s in t.form_version.form.notify))  # on the form's notify list
 
@@ -227,6 +248,11 @@ def validate(schema, form, files=None, existing=None):
                 if f.get("required"):
                     raise Invalid("Required")
                 continue
+            if typ == "approver_email":
+                raw = raw.lower()
+                if not EMAIL.match(raw):
+                    raise Invalid("Enter a valid email address")
+                check_domain(raw)
             if typ == "select" and raw not in f["options"]:
                 raise Invalid("Choose one of the listed options")
             if typ == "multi_select" and not set(raw) <= set(f["options"]):

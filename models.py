@@ -26,8 +26,9 @@ PERMISSIONS = {
     "report.view": "View reports and export",
 }
 
+# approver_email: the requester types someone's email (e.g. their HOD); a workflow stage can send them an approval link.
 FIELD_TYPES = ["text", "textarea", "select", "multi_select", "date", "datetime", "number", "checkbox",
-               "file", "image", "section"]
+               "file", "image", "section", "approver_email"]
 
 # Home page section tiles: colour themes and icons the admin can pick from (styled in fiori.css / _macros.icon).
 SECTION_COLORS = ["green", "red", "amber", "blue", "purple", "grey"]
@@ -63,6 +64,7 @@ class User(db.Model):
     active = db.Column(db.Boolean, default=True, nullable=False)
     failed_logins = db.Column(db.Integer, default=0, nullable=False)
     locked_until = db.Column(db.DateTime)
+    hod_email = db.Column(db.String(255))  # remembered from their last request; pre-fills "approver email" fields
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
     deleted_at = db.Column(db.DateTime)  # soft delete: hidden everywhere; restore by clearing it (and setting active) in the DB
     profiles = db.relationship("PermissionProfile", secondary="user_profile", back_populates="users")
@@ -108,6 +110,21 @@ ticket_watcher = db.Table(
 )
 
 
+group_member = db.Table(
+    "group_member",
+    db.Column("group_id", db.ForeignKey("support_group.id"), primary_key=True),
+    db.Column("user_id", db.ForeignKey("user.id"), primary_key=True),
+)
+
+
+class SupportGroup(db.Model):
+    """A team (Service Desk, Network Team…) whose members share a queue: any member can take a ticket from it."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    description = db.Column(db.String(255), default="", nullable=False)
+    members = db.relationship("User", secondary="group_member", order_by="User.name")
+
+
 class Section(db.Model):
     """A big tile on the home page (IT Requests, IT Incidents, Change Management) grouping forms."""
     id = db.Column(db.Integer, primary_key=True)
@@ -139,9 +156,12 @@ class Form(db.Model):
     # Form-level subscribers: [{"user_id": 3, "events": ["new", "comment", "status", "update"]}] (see core.EVENTS)
     notify = db.Column(db.JSON, default=list, nullable=False, server_default="[]")
     default_assignee_id = db.Column(db.ForeignKey("user.id"))
+    default_group_id = db.Column(db.ForeignKey("support_group.id"))
+    auto_submit = db.Column(db.Boolean, default=False, nullable=False, server_default="0")  # start approval on create
     deleted_at = db.Column(db.DateTime)  # soft delete: hidden everywhere; restore by clearing it in the DB
     versions = db.relationship("FormVersion", order_by="FormVersion.version", back_populates="form")
     section = db.relationship("Section", back_populates="forms")
+    default_group = db.relationship("SupportGroup")
 
     @classmethod
     def live(cls):
@@ -183,6 +203,7 @@ class Ticket(db.Model):
     priority = db.Column(db.String(20))  # None = not set yet
     requester_id = db.Column(db.ForeignKey("user.id"), nullable=False)
     assignee_id = db.Column(db.ForeignKey("user.id"))
+    group_id = db.Column(db.ForeignKey("support_group.id"))  # the team whose queue it is in
     due_date = db.Column(db.Date)
     row_version = db.Column(db.Integer, default=1, nullable=False)   # bumped on every change: conflict detection
     data_version = db.Column(db.Integer, default=1, nullable=False)  # bumped when form values change: what approvers reviewed
@@ -196,6 +217,7 @@ class Ticket(db.Model):
     section = db.relationship("Section")
     requester = db.relationship("User", foreign_keys=[requester_id])
     assignee = db.relationship("User", foreign_keys=[assignee_id])
+    group = db.relationship("SupportGroup")
     comments = db.relationship("Comment", order_by="Comment.created_at")
     history = db.relationship("TicketHistory", order_by="TicketHistory.id.desc()")
     priority_requests = db.relationship("PriorityRequest", order_by="PriorityRequest.created_at.desc()",
@@ -258,6 +280,11 @@ class TicketApproval(db.Model):
     data_version = db.Column(db.Integer)  # ticket data version the approver reviewed
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
     decided_at = db.Column(db.DateTime)
+    # Approver named by email on the request (e.g. the requester's HOD): decides through an emailed link, no sign-in.
+    via_email = db.Column(db.Boolean, default=False, nullable=False, server_default="0")
+    token_hash = db.Column(db.String(64), index=True)  # sha256 of the link's token; cleared once used
+    link_sent_at = db.Column(db.DateTime)
+    link_expires = db.Column(db.DateTime)
 
     ticket = db.relationship("Ticket", back_populates="approvals")
     approver = db.relationship("User")

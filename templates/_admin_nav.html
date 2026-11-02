@@ -6,6 +6,7 @@
   {% endif %}
   {% if g.user.can('user.manage') %}
   <a href="{{ url_for('admin.users') }}" {% if request.endpoint.startswith('admin.user') %}aria-current="page"{% endif %}>Users</a>
+  <a href="{{ url_for('admin.groups') }}" {% if request.endpoint.startswith('admin.group') %}aria-current="page"{% endif %}>Support Groups</a>
   <a href="{{ url_for('admin.profiles') }}" {% if request.endpoint.startswith('admin.profile') %}aria-current="page"{% endif %}>Permission Profiles</a>
   {% endif %}
   {% if g.user.can('report.view') %}<a href="{{ url_for('admin.reports') }}" {% if request.endpoint == 'admin.reports' %}aria-current="page"{% endif %}>Reports</a>{% endif %}

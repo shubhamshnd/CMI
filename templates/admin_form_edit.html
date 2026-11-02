@@ -6,7 +6,7 @@
   <div class="builder-grid">
     <div><label>Label</label><input name="f_label" value="{{ f.label }}" maxlength="120"></div>
     <div><label>ID</label><input name="f_id" value="{{ f.id }}" maxlength="40" placeholder="lower_case_id"></div>
-    <div><label>Type</label><select name="f_type">{% for ty in ['text', 'textarea', 'select', 'multi_select', 'date', 'datetime', 'number', 'checkbox', 'file', 'image', 'section'] %}<option {% if ty == f.type %}selected{% endif %}>{{ ty }}</option>{% endfor %}</select></div>
+    <div><label>Type</label><select name="f_type">{% for ty in FIELD_TYPES %}<option {% if ty == f.type %}selected{% endif %}>{{ ty }}</option>{% endfor %}</select></div>
     <div><label>Required</label><select name="f_required"><option value="no">No</option><option value="yes" {% if f.required %}selected{% endif %}>Yes</option></select></div>
     <div><label title="Changing this field after approval restarts approval">Material</label><select name="f_material"><option value="no">No</option><option value="yes" {% if f.material %}selected{% endif %}>Yes</option></select></div>
     <div class="wide" data-for="select multi_select"><label>Options (comma separated)</label><input name="f_options" value="{{ (f.options or [])|join(', ') }}"></div>

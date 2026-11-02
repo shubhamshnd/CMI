@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{# Reached from an emailed approval link (approval_link): the approver is usually not signed in. #}
+{% block title %}Approval{% endblock %}
+{% block shell %}Approval{% endblock %}
+{% block body %}
+<main class="page narrow">
+  {% if problem %}
+  <div class="panel pad"><h1 class="title">Link not usable</h1><p>{{ problem }}</p></div>
+
+  {% elif done %}
+  <div class="panel pad">
+    <h1 class="title">{{ {'approved': 'Approved', 'rejected': 'Rejected', 'returned': 'Sent back'}[done] }}. Thank you.</h1>
+    <p>{{ t.number }} – {{ t.title }}. {{ t.requester.name }} and the IT team have been notified. This link can no longer be used.</p>
+  </div>
+
+  {% else %}
+  <h1 class="title">{{ t.title }}</h1>
+  <p class="subtitle">{{ t.number }} · {{ t.section.name ~ ' › ' if t.section }}{{ t.form_version.form.name }} ·
+    requested by {{ t.requester.name }} on {{ t.created_at|d }} · your stage: <b>{{ row.stage_name }}</b></p>
+  <div class="panel form-grid">
+    {% for f in t.form_version.schema.fields if f.type not in ('section', 'approver_email') and f.id in t.values %}
+    <div><label>{{ f.label }}</label>
+      <div class="val">{% if f.type in ('file', 'image') %}{% for aid in t.values[f.id] %}{{ attachments[aid].filename if attachments.get(aid) }}<br>{% else %}—{% endfor %}
+        {% else %}{{ show_value(f, t.values[f.id]) }}{% endif %}</div></div>
+    {% endfor %}
+  </div>
+  {% if t.attachments %}<p class="hint">Attachments can be opened by signing in to CMI.</p>{% endif %}
+  <form class="panel pad spaced" method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <div class="field"><label for="comment">Your comment (required to reject or send back)</label>
+      <textarea id="comment" name="comment" rows="3" maxlength="2000"></textarea></div>
+    <div class="actions">
+      <button class="btn reject" name="decision" value="rejected" type="submit">Reject</button>
+      <button class="btn" name="decision" value="returned" type="submit">Send back</button>
+      <button class="btn emph" name="decision" value="approved" type="submit">Approve</button>
+    </div>
+  </form>
+  {% endif %}
+</main>
+{% endblock %}

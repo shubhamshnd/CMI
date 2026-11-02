@@ -26,6 +26,7 @@ load_dotenv(os.environ.get("CMI_ENV_FILE") or os.path.join(os.path.dirname(os.pa
 from flask import (Flask, Response, abort, flash, g, redirect, render_template, request, send_file, session,
                    url_for)
 from flask_migrate import Migrate
+from werkzeug.datastructures import MultiDict
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import core
@@ -33,17 +34,19 @@ from core import (MANUAL_STATUSES, MIN_PASSWORD, PRIORITY_CLASS, STATUS_CLASS, I
                   can_edit_values, can_set_priority, can_submit, can_view, change, need, notify, participants, record, subscribers,
                   set_status,
                   show_value, store_upload, validate)
-from models import (LINK_KINDS, PERMISSIONS, PRIORITIES, STATUSES, Attachment, Comment, Form, FormVersion,
-                    OtpChallenge, PermissionProfile, PriorityRequest, Section, Ticket, TicketApproval, TicketLink, User,
-                    db, utcnow)
-from workflow import current_stage, decide, pending_for, start_approval
+from models import (FIELD_TYPES, LINK_KINDS, PERMISSIONS, PRIORITIES, STATUSES, Attachment, Comment, Form, FormVersion,
+                    OtpChallenge, PermissionProfile, PriorityRequest, Section, SupportGroup, Ticket, TicketApproval,
+                    TicketLink, User, db, utcnow)
+from workflow import current_stage, decide, pending_for, send_link, start_approval, token_hash
 
 OTP_TTL = timedelta(minutes=5)
 OTP_RESEND_AFTER = timedelta(seconds=60)
 OTP_MAX_ATTEMPTS = 5
 LOGIN_MAX_FAILS = 5
 LOCKOUT = timedelta(minutes=15)
-PUBLIC_ENDPOINTS = {"login", "otp_send", "otp_verify", "core_login", "static"}
+PUBLIC_ENDPOINTS = {"login", "otp_send", "otp_verify", "core_login", "static", "approval_link"}
+LINK_RESEND_AFTER = timedelta(minutes=10)
+REMIND_AFTER = timedelta(days=2)  # remind-approvers re-sends links nobody has acted on for this long
 
 log = logging.getLogger("cmi")
 
@@ -67,6 +70,7 @@ app.config.update(
     MAIL_PASSWORD=os.environ.get("CMI_MAIL_PASSWORD"),
     MAIL_FROM=os.environ.get("CMI_MAIL_FROM", "cmi@localhost"),
     SHOW_OTP=os.environ.get("CMI_SHOW_OTP") == "1",  # testing only: sign-in codes are shown on the login page
+    BASE_URL=os.environ.get("CMI_BASE_URL", "http://localhost:5001"),  # for links in mail sent outside a request (CLI)
 )
 if not app.config["SECRET_KEY"]:
     # No key in .env: generate one once and keep it, so restarts and every running copy accept the same sessions.
@@ -86,7 +90,7 @@ Migrate(app, db, render_as_batch=True,  # batch mode: SQLite needs table rebuild
         directory=os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations"))
 app.jinja_env.globals.update(STATUS_CLASS=STATUS_CLASS, PRIORITY_CLASS=PRIORITY_CLASS, PRIORITIES=PRIORITIES,
                              STATUSES=STATUSES, MANUAL_STATUSES=MANUAL_STATUSES, LINK_KINDS=LINK_KINDS,
-                             PERMISSIONS=PERMISSIONS, show_value=show_value)
+                             PERMISSIONS=PERMISSIONS, FIELD_TYPES=FIELD_TYPES, show_value=show_value)
 
 
 # ---------------------------------------------------------------- request guards
@@ -202,12 +206,7 @@ def otp_verify():
         flash("Incorrect code.", "error")
         return redirect(url_for("login"))
     ch.used = True
-    user = User.query.filter_by(email=email).first()
-    if not user:
-        user = User(email=email, name=email.split("@")[0])
-        requester = PermissionProfile.query.filter_by(name="Requester").first()
-        user.profiles = [requester] if requester else []
-        db.session.add(user)
+    user = core.user_for_email(email)
     db.session.commit()
     if not user.active:  # core users may use a code too, as well as their password
         flash("This account is deactivated.", "error")
@@ -332,7 +331,17 @@ def counts(u):
                                                            PriorityRequest.status == "open", Ticket.deleted_at.is_(None)).count(),
         approvals=len(awaiting_my_approval(u)),
         all=Ticket.live().count() if u.can("ticket.view") else None,
+        group=my_queue(u).count() if my_group_ids(u) else None,  # None: not in any support group
     )
+
+
+def my_group_ids(u):
+    return [gr.id for gr in SupportGroup.query.filter(SupportGroup.members.any(User.id == u.id))]
+
+
+def my_queue(u):
+    """Open tickets in the queues of the support groups this user belongs to."""
+    return Ticket.live().filter(Ticket.group_id.in_(my_group_ids(u)), OPEN)
 
 
 def csv_cell(v):
@@ -350,7 +359,7 @@ def home():
                            open_counts={s.id if s else None: section_open(g.user, s) for s, _ in groups})
 
 
-TABS = {"mine": "Mine", "assigned": "Assigned to Me", "priority": "Priority Requests",
+TABS = {"mine": "Mine", "assigned": "Assigned to Me", "group": "My Groups' Queue", "priority": "Priority Requests",
         "approvals": "Pending My Approval", "all": "All Permitted"}
 
 
@@ -358,11 +367,16 @@ TABS = {"mine": "Mine", "assigned": "Assigned to Me", "priority": "Priority Requ
 def tickets():
     u, args = g.user, request.args
     tab = args.get("tab", "mine")
-    if tab not in TABS or (tab == "all" and not u.can("ticket.view")):
+    hidden = {"all"} if not u.can("ticket.view") else set()
+    if not my_group_ids(u):
+        hidden.add("group")
+    if tab not in TABS or tab in hidden:
         tab = "mine"
     q = Ticket.live()
     if tab == "mine":
         q = q.filter(Ticket.requester_id == u.id)
+    elif tab == "group":
+        q = my_queue(u)
     elif tab == "assigned":
         q = q.filter(Ticket.assignee_id == u.id)
     elif tab == "priority":
@@ -391,15 +405,15 @@ def tickets():
     if args.get("export") == "csv":
         out = io.StringIO()
         w = csv.writer(out)
-        w.writerow(["Number", "Title", "Section", "Form", "Version", "Status", "Priority", "Requester", "Assignee", "Due",
-                    "Created (UTC)", "Closed (UTC)"])
+        w.writerow(["Number", "Title", "Section", "Form", "Version", "Status", "Priority", "Requester", "Group",
+                    "Assignee", "Due", "Created (UTC)", "Closed (UTC)"])
         for t in rows:
             w.writerow([csv_cell(v) for v in (t.number, t.title, t.section and t.section.name, t.form_version.form.name,
                                                 t.form_version.version, t.status_label, t.priority, t.requester.name,
-                                                t.assignee and t.assignee.name, t.due_date, t.created_at, t.closed_at)])
+                                                t.group and t.group.name, t.assignee and t.assignee.name, t.due_date, t.created_at, t.closed_at)])
         return Response(out.getvalue(), mimetype="text/csv",
                         headers={"Content-Disposition": f"attachment; filename=cmi-{tab}-{date.today()}.csv"})
-    tabs = {k: v for k, v in TABS.items() if k != "all" or u.can("ticket.view")}
+    tabs = {k: v for k, v in TABS.items() if k not in hidden}
     return render_template("tickets.html", rows=rows, tab=tab, tabs=tabs, counts=counts(u),
                            forms=[f for f in Form.live().order_by(Form.name) if f.visible_to(u)])
 
@@ -420,33 +434,57 @@ def ticket_new():
         values, errors, uploads = validate(fv.schema, request.form, request.files)
         if not title:
             errors["title"] = "Required"
+        for f in fv.schema["fields"]:
+            if f["type"] == "approver_email" and values.get(f["id"]) == g.user.email:
+                errors[f["id"]] = "Enter your HOD's email address, not your own."
         if not errors:
             t = Ticket(title=title[:200], form_version=fv, section=form.section, values={}, requester=g.user,
-                       assignee=form.default_assignee if form.default_assignee and form.default_assignee.active else None)
+                       assignee=form.default_assignee if form.default_assignee and form.default_assignee.active else None,
+                       group=form.default_group)
             db.session.add(t)
             db.session.flush()
             for fid, name, data in uploads:
                 values[fid].append(store_upload(t, fid, name, data).id)
             t.values = values
+            hod = next((values[f["id"]] for f in fv.schema["fields"] if f["type"] == "approver_email" and values.get(f["id"])), None)
+            if hod:
+                g.user.hod_email = hod  # remembered: the next request pre-fills it
             record(t, "created the request")
             if t.assignee:
                 record(t, "updated", "assignee", None, t.assignee.name, note="Default assignee for this form")
+            if t.group:
+                record(t, "updated", "group", None, t.group.name, note="Default group for this form")
             if kind:
                 db.session.add(TicketLink(from_ticket_id=t.id, to_ticket_id=source.id, kind=kind, created_by_id=g.user.id))
                 record(t, "linked", None, None, f"{LINK_KINDS[kind][0]} {source.number}")
                 record(source, "linked", None, None, f"{LINK_KINDS[kind][1]} {t.number}")
+            try:
+                if form.auto_submit and form.workflow:  # e.g. HOD approval starts as soon as the request is raised
+                    start_approval(t)
+            except Invalid as e:
+                db.session.rollback()  # ponytail: uploads already written stay as orphan files (see store_upload)
+                flash(str(e), "error")
+                return render_template("ticket_new.html", form=form, fv=fv, errors={}, data=request.form,
+                                       source=source, kind=kind), 400
             db.session.commit()
-            flash(f"{t.number} created.", "success")
+            flash(f"{t.number} created" + (" and sent for approval." if t.status == "Pending Approval" else "."), "success")
             notify([t.assignee], f"{t.number} assigned to you", f"New request {t.number} – {t.title}.\n\n{link(t)}")
+            if t.group:
+                notify(t.group.members, f"[{t.number}] New in the {t.group.name} queue: {t.title}",
+                       f"{g.user.name} raised {t.number} – {t.title} ({form.name}).\n\n{link(t)}", skip=[t.assignee])
             notify(subscribers(t, "new"), f"[{t.number}] New request: {t.title}",
-                   f"{g.user.name} submitted {t.number} – {t.title} ({form.name}).\n\n{link(t)}", skip=[t.assignee])
+                   f"{g.user.name} submitted {t.number} – {t.title} ({form.name}).\n\n{link(t)}",
+                   skip=[t.assignee, *(t.group.members if t.group else [])])
             return back(t)
         data = request.form
     elif source:  # carry forward matching fields from the earlier ticket
         data = as_form_data(fv.schema, source.values)
         data["title"] = f"{LINK_KINDS[kind][0] if kind else 'Copy of'}: {source.title}"[:200]
     else:
-        data = request.form
+        data = MultiDict(request.form)
+        for f in fv.schema["fields"]:  # pre-fill the HOD stored for this requester
+            if f["type"] == "approver_email" and not data.get(f["id"]) and g.user.hod_email:
+                data[f["id"]] = g.user.hod_email
     return render_template("ticket_new.html", form=form, fv=fv, errors=errors, data=data, source=source, kind=kind)
 
 
@@ -518,7 +556,8 @@ def ticket_detail(tid):
         my_requests=[r for r in t.open_priority_requests if r.requested_to_id == g.user.id],
         can_set_priority=can_set_priority(g.user, t), can_edit_values=can_edit_values(g.user, t),
         can_submit=can_submit(g.user, t), can_view=lambda other: can_view(g.user, other),
-        participants=participants(t), all_users=User.query.filter_by(active=True).order_by(User.name).all())
+        participants=participants(t), all_users=User.query.filter_by(active=True).order_by(User.name).all(),
+        groups=SupportGroup.query.order_by(SupportGroup.name).all(), current=current_stage(t) if t.status == "Pending Approval" else [])
 
 
 @app.post("/tickets/<int:tid>/assign")
@@ -531,20 +570,47 @@ def ticket_assign(tid):
     assignee = db.session.get(User, aid) if aid else None
     if aid and not (assignee and assignee.is_core and assignee.active):
         abort(400)
+    gid = request.form.get("group_id", type=int)
+    group = db.session.get(SupportGroup, gid) if gid else None
+    if gid and not group:
+        abort(400)
     try:
         due = date.fromisoformat(request.form["due_date"]) if request.form.get("due_date") else None
     except ValueError:
         abort(400)
+    regrouped = "group_id" in request.form and change(t, "group", group, lambda gr: gr.name if gr else None)
     reassigned = change(t, "assignee", assignee, lambda u: u.name if u else None)
-    if change(t, "due_date", due) or reassigned:
+    if change(t, "due_date", due) or reassigned or regrouped:
         t.row_version += 1
         db.session.commit()
         flash("Assignment saved.", "success")
         if reassigned:
             notify([assignee], f"{t.number} assigned to you", f"{g.user.name} assigned you {t.number} – {t.title}.\n\n{link(t)}")
+        if regrouped and group:
+            notify(group.members, f"[{t.number}] Moved to the {group.name} queue: {t.title}",
+                   f"{g.user.name} moved {t.number} – {t.title} to the {group.name} queue.\n\n{link(t)}",
+                   skip=[assignee] if reassigned else [])
         notify(subscribers(t, "update"), f"[{t.number}] {t.title}",
                f"{g.user.name} set the assignee of {t.number} to {t.assignee.name if t.assignee else 'nobody'}"
-               f" (due {t.due_date or 'not set'}).\n\n{link(t)}", skip=[assignee] if reassigned else [])
+               f"{' in ' + t.group.name if t.group else ''} (due {t.due_date or 'not set'}).\n\n{link(t)}",
+               skip=[assignee] if reassigned else [])
+    return back(t)
+
+
+@app.post("/tickets/<int:tid>/take")
+def ticket_take(tid):
+    """A member of the ticket's support group picks it up from the queue."""
+    t = get_ticket(tid)
+    if not (t.group and g.user in t.group.members) or t.assignee_id or t.status in ("Closed", "Rejected"):
+        abort(403)
+    if stale(t):
+        return back(t)
+    change(t, "assignee", g.user, lambda u: u.name if u else None)
+    t.row_version += 1
+    db.session.commit()
+    flash(f"{t.number} is assigned to you.", "success")
+    notify(subscribers(t, "update"), f"[{t.number}] {t.title}",
+           f"{g.user.name} took {t.number} – {t.title} from the {t.group.name} queue.\n\n{link(t)}")
     return back(t)
 
 
@@ -641,8 +707,9 @@ def ticket_submit(tid):
 @app.post("/tickets/<int:tid>/decide")
 def ticket_decide(tid):
     t = get_ticket(tid)
-    need("ticket.approve")
     row = pending_for(g.user, t)
+    if row and not row.via_email:
+        need("ticket.approve")  # someone the requester named by email (their HOD) needs no approver profile
     if not row or stale(t):  # not your turn, already decided, or the ticket changed under you
         if not row:
             flash("There is no approval waiting for you on this ticket.", "error")
@@ -658,6 +725,61 @@ def ticket_decide(tid):
     t.row_version += 1
     db.session.commit()
     flash(f"You {decision} {t.number}.", "success")
+    return back(t, "approvals")
+
+
+@app.route("/approve/<token>", methods=["GET", "POST"])
+def approval_link(token):
+    """The page an approver named by email (e.g. a HOD) reaches from their link: no sign-in, works once."""
+    row = TicketApproval.query.filter_by(token_hash=token_hash(token)).first()
+    t = row and row.ticket
+    if not row or t.deleted_at:
+        problem = "This approval link is not valid. It may have been replaced by a newer email."
+    elif row.decision:
+        problem = f"This request was already {row.decision}."
+    elif row.link_expires < utcnow():
+        problem = "This approval link has expired. Ask the requester or the IT team to resend it."
+    elif t.status != "Pending Approval" or row not in current_stage(t):
+        problem = "This request is no longer waiting for your approval (it may have been changed or withdrawn)."
+    else:
+        problem = None
+    if problem:
+        return render_template("approve.html", problem=problem), 410
+    if request.method == "POST":
+        decision = request.form.get("decision")
+        comment = request.form.get("comment", "").strip()[:2000]
+        if decision not in ("approved", "rejected", "returned"):
+            abort(400)
+        if decision != "approved" and not comment:
+            flash("Add a comment explaining why you reject or send back the request.", "error")
+        else:
+            me, g.user = g.user, row.approver  # recorded and mailed as the approver, whoever is signed in here
+            decide(t, row, decision, comment, row.approver)
+            t.row_version += 1
+            db.session.commit()
+            g.user = me
+            return render_template("approve.html", done=decision, t=t)
+    return render_template("approve.html", t=t, row=row, attachments={a.id: a for a in t.attachments})
+
+
+@app.post("/tickets/<int:tid>/approvals/<int:aid>/resend")
+def approval_resend(tid, aid):
+    """Send a fresh link to an approver named by email; the old link stops working."""
+    t = get_ticket(tid)
+    row = db.session.get(TicketApproval, aid)
+    if not row or row.ticket_id != t.id or not row.via_email:
+        abort(404)
+    if g.user.id != t.requester_id and not g.user.can("ticket.assign"):
+        abort(403)
+    if row.decision or t.status != "Pending Approval" or row not in current_stage(t):
+        flash("That approval is no longer waiting.", "error")
+    elif row.link_sent_at and utcnow() - row.link_sent_at < LINK_RESEND_AFTER:
+        flash("The link was sent a few minutes ago. Wait a little before sending it again.", "error")
+    else:
+        send_link(t, row)
+        record(t, "resent the approval link", None, None, row.approver.email)
+        db.session.commit()
+        flash(f"Sent a new approval link to {row.approver.email}.", "success")
     return back(t, "approvals")
 
 
@@ -856,6 +978,7 @@ def _sub(options, label="Subcategory"):
 
 
 _NEEDED_BY = {"id": "needed_by", "label": "Needed By", "type": "date"}
+_HOD = {"id": "hod_email", "label": "HOD Email (for approval)", "type": "approver_email", "required": True, "material": True}
 _JUSTIFICATION = {"id": "justification", "label": "Business Justification", "type": "textarea", "required": True, "max_length": 2000}
 _INCIDENT = [  # every incident form ends with these; impact + can_work feed the priority the service desk sets
     {"id": "affected", "label": "Who is affected?", "type": "select", "required": True,
@@ -871,13 +994,13 @@ SEED_FORMS.update({
         _sub(["VPN", "Shared folder", "Application access", "Email group", "Other"]),
         {"id": "system", "label": "System / folder / group name", "type": "text", "required": True, "max_length": 200},
         {"id": "access_level", "label": "Access Level", "type": "select", "options": ["Read", "Read / Write", "Admin"]},
-        _NEEDED_BY, _JUSTIFICATION]),
+        _NEEDED_BY, _JUSTIFICATION, _HOD]),
     "SOFTWARE_INSTALL": ("Software Installation", "Install or upgrade software on your machine", [
         {"id": "software", "label": "Software Name and Version", "type": "text", "required": True, "max_length": 200},
         {"id": "licence", "label": "Licence", "type": "select", "required": True, "material": True,
          "options": ["Free / open source", "Licensed (company already has it)", "Licensed (needs purchase)"]},
         {"id": "machine", "label": "Machine (hostname or asset tag)", "type": "text", "required": True, "max_length": 100},
-        _JUSTIFICATION]),
+        _JUSTIFICATION, _HOD]),
     "HARDWARE_REQUEST": ("Hardware Request", "Laptop, monitor, peripherals", [
         {"id": "item", "label": "Item", "type": "select", "required": True, "material": True,
          "options": ["Laptop", "Desktop", "Monitor", "Keyboard / Mouse", "Headset", "Printer", "Other"]},
@@ -885,14 +1008,14 @@ SEED_FORMS.update({
         {"id": "replacement", "label": "Replacing faulty or old equipment", "type": "checkbox"},
         {"id": "old_asset", "label": "Asset tag being replaced", "type": "text", "max_length": 100,
          "show_if": {"field": "replacement", "equals": "yes"}},
-        _NEEDED_BY, _JUSTIFICATION]),
+        _NEEDED_BY, _JUSTIFICATION, _HOD]),
     "IT_SERVICE": ("IT Services", "New joiner setup, email ID, backup restore and more", [
         _sub(["New joiner setup", "Email ID creation", "Backup restore", "Meeting room / AV support", "Other"], "Service"),
         {"id": "details", "label": "Details", "type": "textarea", "required": True, "max_length": 4000},
-        _NEEDED_BY]),
+        _NEEDED_BY, _HOD]),
     "OTHER_REQUEST": ("Other Request", "Anything not listed above", [
         {"id": "details", "label": "What do you need?", "type": "textarea", "required": True, "max_length": 4000},
-        {"id": "attachment", "label": "Attachment", "type": "file", "max_count": 3}]),
+        {"id": "attachment", "label": "Attachment", "type": "file", "max_count": 3}, _HOD]),
     # IT Incidents
     "IT_ISSUE": ("IT Issue", "Login, email, printer, shared drive", [
         _sub(["Login / password", "Email", "Printer", "Shared drive", "Other"]), *_INCIDENT]),
@@ -925,7 +1048,7 @@ SEED_FORMS.update({
         {"id": "planned_start", "label": "Planned Start", "type": "datetime", "required": True, "material": True},
         {"id": "planned_end", "label": "Planned End", "type": "datetime", "required": True, "material": True},
         {"id": "rollback_plan", "label": "Rollback Plan", "type": "textarea", "required": True, "material": True},
-        {"id": "test_evidence", "label": "Test Evidence", "type": "file", "max_count": 3}]),
+        {"id": "test_evidence", "label": "Test Evidence", "type": "file", "max_count": 3}, _HOD]),
     "EMERGENCY_CHANGE": ("Emergency Change", "Urgent fix to restore service", [
         {"id": "incident", "label": "Related Incident Number", "type": "text", "max_length": 20},
         {"id": "systems", "label": "Systems Affected", "type": "multi_select", "required": True, "material": True,
@@ -934,6 +1057,17 @@ SEED_FORMS.update({
         {"id": "planned_start", "label": "Planned Start", "type": "datetime", "required": True, "material": True},
         {"id": "rollback_plan", "label": "Rollback Plan", "type": "textarea", "required": True, "material": True}]),
 })
+SEED_GROUPS = [  # name, description, member emails
+    ("Service Desk", "First line: picks up new requests and incidents", ["assigner@cmi.local", "engineer@cmi.local"]),
+    ("Desktop Support", "Laptops, desktops, printers and software", ["engineer@cmi.local"]),
+    ("Network Team", "Internet, Wi-Fi, VPN and LAN", ["engineer@cmi.local"]),
+]
+SEED_FORM_GROUPS = {  # form key: support group whose queue its new tickets land in
+    **{k: "Service Desk" for k in ("ACCESS_REQUEST", "IT_SERVICE", "OTHER_REQUEST", "IT_ISSUE", "SOFTWARE_ISSUE",
+                                   "OTHER_INCIDENT", "FIREWALL_RULE")},
+    **{k: "Desktop Support" for k in ("SOFTWARE_INSTALL", "HARDWARE_REQUEST", "HARDWARE_ISSUE")},
+    "NETWORK_ISSUE": "Network Team",
+}
 SEED_SECTIONS = [  # name, prefix, colour, icon, core users only, closed label, description, form keys
     ("IT Requests", "REQ", "green", "cart", False, "Fulfilled", "Ask for access, software, hardware",
      ["ACCESS_REQUEST", "SOFTWARE_INSTALL", "HARDWARE_REQUEST", "IT_SERVICE", "OTHER_REQUEST"]),
@@ -962,27 +1096,37 @@ def seed():
             created.append(email)
     db.session.flush()
     uid = {u.email: u.id for u in User.query}
+    hod = {"name": "HOD Approval", "mode": "any", "approvers": [], "approver_field": "hod_email", "condition": None}
     workflows = {
+        **{key: [hod] for key in SEED_SECTIONS[0][7]},
         "INFRA_CHANGE": [
             {"name": "Technical Review", "mode": "any", "approvers": [uid["lead@cmi.local"]], "condition": None},
             {"name": "CAB", "mode": "any", "approvers": [uid["cab@cmi.local"]], "condition": {"field": "risk", "equals": "High"}},
         ],
         "FIREWALL_RULE": [{"name": "Security Review", "mode": "any", "approvers": [uid["lead@cmi.local"]], "condition": None}],
-        "SOFTWARE_INSTALL": [{"name": "IT Head Approval", "mode": "any", "approvers": [uid["lead@cmi.local"]],
-                              "condition": {"field": "licence", "equals": "Licensed (needs purchase)"}}],
-        "HARDWARE_REQUEST": [{"name": "IT Head Approval", "mode": "any", "approvers": [uid["lead@cmi.local"]], "condition": None}],
+        "SOFTWARE_INSTALL": [hod, {"name": "IT Head Approval", "mode": "any", "approvers": [uid["lead@cmi.local"]],
+                                   "condition": {"field": "licence", "equals": "Licensed (needs purchase)"}}],
+        "HARDWARE_REQUEST": [hod, {"name": "IT Head Approval", "mode": "any", "approvers": [uid["lead@cmi.local"]], "condition": None}],
         "NORMAL_CHANGE": [
+            hod,
             {"name": "Technical Review", "mode": "any", "approvers": [uid["lead@cmi.local"]], "condition": None},
             {"name": "CAB", "mode": "all", "approvers": [uid["cab@cmi.local"]], "condition": None},
         ],
         "EMERGENCY_CHANGE": [{"name": "Emergency CAB", "mode": "any", "approvers": [uid["cab@cmi.local"]], "condition": None}],
     }
-    service_desk = {"FIREWALL_RULE", *SEED_SECTIONS[0][7], *SEED_SECTIONS[1][7]}  # land with the assigner by default
+    groups = {}
+    for name, desc, emails in SEED_GROUPS:
+        groups[name] = SupportGroup.query.filter_by(name=name).first()
+        if not groups[name]:
+            groups[name] = SupportGroup(name=name, description=desc, members=[u for u in User.query if u.email in emails])
+            db.session.add(groups[name])
     for key, (name, desc, fields) in SEED_FORMS.items():
         if not Form.query.filter_by(key=key).first():
             schema = {"fields": fields}
             db.session.add(Form(key=key, name=name, description=desc, draft=schema, workflow=workflows.get(key, []),
-                                default_assignee_id=uid["assigner@cmi.local"] if key in service_desk else None,
+                                default_group=groups[SEED_FORM_GROUPS[key]] if key in SEED_FORM_GROUPS else None,
+                                default_assignee_id=uid["assigner@cmi.local"] if key == "FIREWALL_RULE" else None,
+                                auto_submit=key in SEED_SECTIONS[0][7],  # IT Requests go to the HOD straight away
                                 versions=[FormVersion(version=1, schema=schema)]))
     for pos, (name, prefix, color, icon, core_only, closed, desc, keys) in enumerate(SEED_SECTIONS, 1):
         s = Section.query.filter_by(name=name).first()
@@ -998,9 +1142,23 @@ def seed():
         if t.form_version.form.section and t.form_version.form.section.prefix == "CHG":
             t.section = t.form_version.form.section
     db.session.commit()
-    print("Seeded profiles, sections, forms and workflows.")
+    print("Seeded profiles, support groups, sections, forms and workflows.")
     if created:
         print(f"Core users {', '.join(created)} created with password: {password}")
+
+
+@app.cli.command("remind-approvers")
+def remind_approvers():
+    """Re-send approval links that nobody named by email (e.g. a HOD) has acted on for 2 days. Run daily."""
+    sent = 0
+    with app.test_request_context(base_url=app.config["BASE_URL"]):  # url_for() needs it to build the links
+        for t in Ticket.live().filter_by(status="Pending Approval"):
+            for row in current_stage(t):
+                if row.via_email and row.decision is None and (not row.link_sent_at or utcnow() - row.link_sent_at >= REMIND_AFTER):
+                    send_link(t, row, reminder=True)
+                    sent += 1
+        db.session.commit()
+    print(f"Sent {sent} reminder(s).")
 
 
 def sqlite_path():

@@ -424,7 +424,14 @@ def test_admin_soft_deletes_a_request(mail):
 
 # ---------------------------------------------------------------- sections (home page tiles)
 
-ACCESS = {"title": "VPN access", "subcategory": "VPN", "system": "Corp VPN", "justification": "Remote work"}
+ACCESS = {"title": "VPN access", "subcategory": "VPN", "system": "Corp VPN", "justification": "Remote work",
+          "hod_email": "hod@corp.com"}
+
+
+def hod_link(mail, to="hod@corp.com"):
+    """Path of the newest approval link mailed to the HOD."""
+    body = next(m[2] for m in reversed(mail) if m[0] == to and "/approve/" in m[2])
+    return re.search(r"(/approve/[\w-]+)", body).group(1)
 
 
 def test_end_users_see_requests_and_incidents_but_not_change_management(mail):
@@ -445,6 +452,7 @@ def test_ticket_numbered_and_closed_by_section(mail):
     assert f"REQ-{tid:04d}" in page
     admin = login("admin@cmi.local")
     assert f"REQ-{tid:04d}" in admin.get(f"/tickets?tab=all&q=REQ-{tid:04d}").get_data(as_text=True)
+    post(cmi.app.test_client(), hod_link(mail), decision="approved")
     post(admin, f"/tickets/{tid}/status", status="Closed", rv=rv(tid))
     assert ">Fulfilled<" in admin.get(f"/tickets/{tid}").get_data(as_text=True)
     with cmi.app.app_context():
@@ -471,6 +479,111 @@ def test_admin_manages_sections(mail):
     assert "Other Incident" not in requester(mail).get("/home").get_data(as_text=True)  # now core users only
     assert post(admin, f"/admin/sections/{sid}", action="delete").status_code == 302
     assert "Move this section" in admin.get(f"/admin/sections/{sid}").get_data(as_text=True)  # still has a form
+
+
+# ---------------------------------------------------------------- HOD approval by email link
+
+def test_hod_approves_from_email_link_without_signing_in(mail):
+    req = requester(mail)
+    tid = create(req, form="ACCESS_REQUEST", **ACCESS)
+    with cmi.app.app_context():
+        assert ticket(tid).status == "Pending Approval"  # the form starts approval on submit
+    link = hod_link(mail)
+    hod = cmi.app.test_client()  # nobody signed in
+    assert "VPN access" in hod.get(link).get_data(as_text=True)
+    assert "can no longer be used" in post(hod, link, decision="approved").get_data(as_text=True)
+    with cmi.app.app_context():
+        t = ticket(tid)
+        assert t.status == "Approved" and t.approvals[0].approver.email == "hod@corp.com" and t.approvals[0].via_email
+        assert TicketHistory.query.filter_by(ticket_id=tid, action="approved").one().actor.email == "hod@corp.com"
+    assert any(m[0] == "req@corp.com" and "approved" in m[1] for m in mail)
+    assert hod.get(link).status_code == 410  # works once
+
+
+def test_hod_must_comment_to_reject_or_send_back(mail):
+    tid = create(requester(mail), form="ACCESS_REQUEST", **ACCESS)
+    hod, link = cmi.app.test_client(), hod_link(mail)
+    assert "Add a comment" in post(hod, link, decision="returned").get_data(as_text=True)
+    post(hod, link, decision="returned", comment="Which VPN profile?")
+    with cmi.app.app_context():
+        assert ticket(tid).status == "Returned"
+
+
+def test_hod_email_rules_and_remembered(mail, monkeypatch):
+    req = requester(mail)
+    r = post(req, "/tickets/new?form=ACCESS_REQUEST", **{**ACCESS, "hod_email": "req@corp.com"})
+    assert r.status_code == 200 and "not your own" in r.get_data(as_text=True)
+    monkeypatch.setitem(cmi.app.config, "ALLOWED_EMAIL_DOMAINS", ["corp.com"])
+    r = post(req, "/tickets/new?form=ACCESS_REQUEST", **{**ACCESS, "hod_email": "boss@gmail.com"})
+    assert "company email address" in r.get_data(as_text=True)
+    create(req, form="ACCESS_REQUEST", **ACCESS)
+    page = req.get("/tickets/new?form=SOFTWARE_INSTALL").get_data(as_text=True)  # any form with a HOD field
+    assert 'value="hod@corp.com"' in page and "Remembered from your last request" in page
+    admin = login("admin@cmi.local")
+    with cmi.app.app_context():
+        from models import PermissionProfile
+        requester_profile = str(PermissionProfile.query.filter_by(name="Requester").one().id)
+    post(admin, f"/admin/users/{uid('req@corp.com')}", name="Req", hod_email="new.hod@corp.com", active="on",
+         profiles=requester_profile)
+    assert 'value="new.hod@corp.com"' in req.get("/tickets/new?form=ACCESS_REQUEST").get_data(as_text=True)
+
+
+def test_resend_replaces_the_link_and_reminders_go_out(mail):
+    from datetime import timedelta
+    from models import TicketApproval, utcnow
+    req = requester(mail)
+    tid = create(req, form="ACCESS_REQUEST", **ACCESS)
+    old = hod_link(mail)
+    with cmi.app.app_context():
+        aid = TicketApproval.query.filter_by(ticket_id=tid).one().id
+    post(req, f"/tickets/{tid}/approvals/{aid}/resend")  # too soon: refused
+    assert hod_link(mail) == old
+
+    def age(**fields):
+        with cmi.app.app_context():
+            row = db.session.get(TicketApproval, aid)
+            for k, v in fields.items():
+                setattr(row, k, v)
+            db.session.commit()
+    age(link_sent_at=utcnow() - timedelta(hours=1))
+    post(req, f"/tickets/{tid}/approvals/{aid}/resend")
+    new = hod_link(mail)
+    assert new != old and cmi.app.test_client().get(old).status_code == 410
+    assert cmi.app.test_client().get(new).status_code == 200
+    age(link_expires=utcnow() - timedelta(minutes=1))
+    assert "expired" in cmi.app.test_client().get(new).get_data(as_text=True)
+    age(link_sent_at=utcnow() - timedelta(days=3))
+    result = cmi.app.test_cli_runner().invoke(args=["remind-approvers"])
+    assert "Sent 1 reminder" in result.output
+    assert mail[-1][0] == "hod@corp.com" and mail[-1][1].startswith("Reminder:")
+    assert cmi.app.test_client().get(hod_link(mail)).status_code == 200  # the reminder carries a fresh link
+
+
+# ---------------------------------------------------------------- support groups
+
+INCIDENT = {"title": "Outlook keeps crashing", "subcategory": "Email", "affected": "Just me", "can_work": "No",
+            "description": "Since this morning"}
+
+
+def test_support_group_queue_and_take(mail):
+    tid = create(requester(mail), form="IT_ISSUE", **INCIDENT)
+    with cmi.app.app_context():
+        assert ticket(tid).group.name == "Service Desk" and ticket(tid).assignee is None
+    assert any(m[0] == "engineer@cmi.local" and "Service Desk queue" in m[1] for m in mail)
+    eng = login("engineer@cmi.local")
+    assert f"INC-{tid:04d}" in eng.get("/tickets?tab=group").get_data(as_text=True)
+    assert post(login("lead@cmi.local"), f"/tickets/{tid}/take", rv=rv(tid)).status_code == 403  # not a member
+    post(eng, f"/tickets/{tid}/take", rv=rv(tid))
+    with cmi.app.app_context():
+        assert ticket(tid).assignee.email == "engineer@cmi.local"
+    assert post(login("assigner@cmi.local"), f"/tickets/{tid}/take", rv=rv(tid)).status_code == 403  # already taken
+
+
+def test_admin_creates_support_group(mail):
+    admin = login("admin@cmi.local")
+    assert post(admin, "/admin/groups/new", name="Service Desk").status_code == 400  # name taken
+    assert post(admin, "/admin/groups/new", name="Applications", members=str(uid("lead@cmi.local"))).status_code == 302
+    assert "Neha Lead" in admin.get("/admin/groups").get_data(as_text=True)
 
 
 # ---------------------------------------------------------------- export & backup
