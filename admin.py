@@ -5,18 +5,21 @@ import secrets
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 from statistics import mean
+from types import SimpleNamespace
 
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
 from werkzeug.security import generate_password_hash
 
-from core import EVENTS, FILE_TYPES, MIN_PASSWORD, need
-from models import (FIELD_TYPES, PERMISSIONS, Form, FormVersion, PermissionProfile, Ticket, TicketApproval, User, db,
-                    utcnow)
+from core import EMAIL, EVENTS, FILE_TYPES, MIN_PASSWORD, need
+from models import (FIELD_TYPES, PERMISSIONS, PRIORITIES, SECTION_COLORS, SECTION_ICONS, Form, FormVersion, PermissionProfile,
+                    Section, SlaRule, SupportGroup, Ticket, TicketApproval, User, db, utcnow)
+import sla
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 FIELD_ID = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 FORM_KEY = re.compile(r"^[A-Z][A-Z0-9_]{1,59}$")
+PREFIX = re.compile(r"^[A-Z]{2,5}$")
 BUILDER_KEYS = ["id", "label", "type", "required", "material", "options", "min", "max", "max_length", "accept",
                 "max_mb", "max_count", "show_field", "show_value"]
 
@@ -86,7 +89,19 @@ def validate_schema(fields):
 def forms():
     need("form.publish")
     usage = Counter(fid for (fid,) in db.session.query(FormVersion.form_id).join(Ticket, Ticket.form_version_id == FormVersion.id).filter(Ticket.deleted_at.is_(None)))
-    return render_template("admin_forms.html", forms=Form.live().order_by(Form.archived, Form.name).all(), usage=usage)
+    forms = sorted(Form.live(), key=lambda f: (f.archived, f.section.position if f.section else 1e9, f.section_id or 0,
+                                                f.position, f.name))
+    return render_template("admin_forms.html", forms=forms, usage=usage, sections=all_sections())
+
+
+def all_sections():
+    return Section.query.order_by(Section.position, Section.name).all()
+
+
+def chosen_section():
+    """Section picked in a form's settings: an existing id, or None for "no section"."""
+    sid = request.form.get("section_id", type=int)
+    return db.session.get(Section, sid) if sid else None
 
 
 @bp.post("/forms/new")
@@ -101,7 +116,8 @@ def form_new():
     elif not name:
         flash("Name is required.", "error")
     else:
-        f = Form(key=key, name=name, description=request.form.get("description", "").strip()[:255], draft={"fields": []})
+        f = Form(key=key, name=name, description=request.form.get("description", "").strip()[:255], draft={"fields": []},
+                 section=chosen_section())
         db.session.add(f)
         db.session.commit()
         return redirect(url_for("admin.form_edit", fid=f.id))
@@ -122,8 +138,10 @@ def form_edit(fid):
         if errors:
             for e in errors:
                 flash(e, "error")
-            return render_template("admin_form_edit.html", form=form, fields=fields, name=name), 400
+            return render_template("admin_form_edit.html", form=form, fields=fields, name=name, sections=all_sections()), 400
         form.name, form.description = name, request.form.get("description", "").strip()[:255]
+        form.section = chosen_section()  # takes effect at once (new tickets only); not part of the published version
+        form.position = request.form.get("position", type=int) or 0
         form.draft = {"fields": fields}
         action = request.form.get("action")
         if action == "publish":
@@ -140,7 +158,7 @@ def form_edit(fid):
         if action == "preview":
             return redirect(url_for("admin.form_preview", fid=form.id))
         return redirect(url_for("admin.form_edit", fid=form.id))
-    return render_template("admin_form_edit.html", form=form, fields=fields, name=form.name)
+    return render_template("admin_form_edit.html", form=form, fields=fields, name=form.name, sections=all_sections())
 
 
 @bp.get("/forms/<int:fid>/preview")
@@ -162,7 +180,8 @@ def form_duplicate(fid):
     while Form.query.filter_by(key=key if n == 1 else f"{key}{n}").first():
         n += 1
     f = Form(key=key if n == 1 else f"{key}{n}", name=f"Copy of {src.name}"[:120], description=src.description,
-             draft=copy.deepcopy(src.draft), workflow=copy.deepcopy(src.workflow), default_assignee_id=src.default_assignee_id)
+             draft=copy.deepcopy(src.draft), workflow=copy.deepcopy(src.workflow), default_assignee_id=src.default_assignee_id,
+             section_id=src.section_id)
     db.session.add(f)
     db.session.commit()
     flash(f"Created {f.key} as an unpublished draft.", "success")
@@ -232,43 +251,207 @@ def form_workflow(fid):
                      if f["type"] not in ("file", "image", "section")}
     approvers = [u for u in User.query.filter_by(active=True).order_by(User.name) if u.can("ticket.approve")]
     core_users = User.query.filter_by(is_core=True, active=True).order_by(User.name).all()
+    email_fields = {fid: f for fid, f in schema_fields.items() if f["type"] == "approver_email"}
+    groups = SupportGroup.query.order_by(SupportGroup.name).all()
     if request.method == "POST":
         by_email = {u.email: u for u in approvers}
-        cols = {k: request.form.getlist("s_" + k) for k in ("name", "mode", "approvers", "cond_field", "cond_value")}
+        cols = {k: request.form.getlist("s_" + k) for k in ("name", "mode", "approvers", "field", "cond_field", "cond_value")}
         stages, errors = [], []
         for i in range(len(cols["name"])):
-            v = {k: cols[k][i].strip() for k in cols}
+            v = {k: (cols[k][i].strip() if i < len(cols[k]) else "") for k in cols}
             emails = [e.lower() for e in re.split(r"[,\s;]+", v["approvers"]) if e]
             unknown = [e for e in emails if e not in by_email]
             if not v["name"]:
                 errors.append(f"Stage {i + 1}: name is required.")
-            if not emails or unknown:
+            if v["field"]:  # approver named on the request (e.g. HOD email); listed approvers are not used
+                if v["field"] not in email_fields:
+                    errors.append(f"Stage {i + 1}: choose an “approver email” field of this form.")
+                emails = []
+            elif not emails or unknown:
                 errors.append(f"Stage {i + 1}: approvers must be active users with approval permission"
                               + (f" (not: {', '.join(unknown)})." if unknown else "."))
             if v["cond_field"] and (v["cond_field"] not in schema_fields or not v["cond_value"]):
                 errors.append(f"Stage {i + 1}: condition needs a form field and a value.")
-            stages.append({"name": v["name"][:120], "mode": "all" if v["mode"] == "all" else "any",
-                           "approvers": list(dict.fromkeys(by_email[e].id for e in emails if e in by_email)),
-                           "condition": {"field": v["cond_field"], "equals": v["cond_value"]} if v["cond_field"] else None})
+            stage = {"name": v["name"][:120], "mode": "all" if v["mode"] == "all" else "any",
+                     "approvers": list(dict.fromkeys(by_email[e].id for e in emails if e in by_email)),
+                     "condition": {"field": v["cond_field"], "equals": v["cond_value"]} if v["cond_field"] else None}
+            if v["field"]:
+                stage["approver_field"] = v["field"]
+            stages.append(stage)
         da = request.form.get("default_assignee_id", type=int)
         if da and da not in {u.id for u in core_users}:
             errors.append("Default assignee must be an active core user.")
+        dg = request.form.get("default_group_id", type=int)
+        if dg and dg not in {gr.id for gr in groups}:
+            errors.append("Choose an existing support group.")
+        pcols = {k: request.form.getlist("p_" + k) for k in ("field1", "value1", "field2", "value2", "priority")}
+        priority_rules = []
+        for i in range(len(pcols["priority"])):
+            v = {k: (pcols[k][i].strip() if i < len(pcols[k]) else "") for k in pcols}
+            when = [{"field": v[f"field{n}"], "equals": v[f"value{n}"]} for n in (1, 2) if v[f"field{n}"]]
+            if not when or any(c["field"] not in schema_fields or not c["equals"] for c in when) or v["priority"] not in PRIORITIES:
+                errors.append(f"Priority rule {i + 1}: choose a field and a value, and a priority.")
+            priority_rules.append({"when": when, "priority": v["priority"]})
         if errors:
             for e in errors:
                 flash(e, "error")
         else:
-            form.workflow, form.default_assignee_id = stages, da
+            form.workflow, form.default_assignee_id, form.default_group_id = stages, da, dg
+            form.auto_submit = "auto_submit" in request.form
+            form.priority_rules = priority_rules
             db.session.commit()
             flash("Workflow saved. It applies to requests submitted for approval from now on.", "success")
             return redirect(url_for("admin.form_workflow", fid=form.id))
     else:
-        stages = form.workflow
+        stages, priority_rules = form.workflow, form.priority_rules
     names = {u.id: u.email for u in User.query}
     return render_template("admin_workflow.html", form=form, stages=stages, schema_fields=schema_fields,
-                           approvers=approvers, core_users=core_users, names=names)
+                           approvers=approvers, core_users=core_users, names=names, email_fields=email_fields,
+                           groups=groups, priority_rules=priority_rules)
+
+
+# ---------------------------------------------------------------- sections
+
+@bp.get("/sections")
+def sections():
+    need("form.publish")
+    return render_template("admin_sections.html", sections=all_sections())
+
+
+@bp.route("/sections/new", methods=["GET", "POST"])
+@bp.route("/sections/<int:sid>", methods=["GET", "POST"])
+def section_edit(sid=None):
+    """A home page tile: its look, who may see it, and what its tickets are numbered and closed as."""
+    need("form.publish")
+    s = (db.session.get(Section, sid) or abort(404)) if sid else Section(color="blue", icon="doc", position=len(all_sections()) + 1)
+    if request.method == "POST":
+        if request.form.get("action") == "delete":
+            if s.forms:
+                flash("Move this section's forms to another section before deleting it.", "error")
+                return redirect(url_for("admin.section_edit", sid=s.id))
+            if Ticket.query.filter_by(section_id=s.id).first():
+                flash("Tickets were raised in this section, so it cannot be deleted. Hide it by removing its forms.", "error")
+                return redirect(url_for("admin.section_edit", sid=s.id))
+            db.session.delete(s)
+            db.session.commit()
+            flash("Section deleted.", "success")
+            return redirect(url_for("admin.sections"))
+        v = dict(name=request.form.get("name", "").strip()[:80],
+                 description=request.form.get("description", "").strip()[:255],
+                 prefix=request.form.get("prefix", "").strip().upper(),
+                 color=request.form.get("color") if request.form.get("color") in SECTION_COLORS else "blue",
+                 icon=request.form.get("icon") if request.form.get("icon") in SECTION_ICONS else "doc",
+                 position=request.form.get("position", type=int) or 0,
+                 core_only=request.form.get("visible_to") == "core",
+                 closed_label=request.form.get("closed_label", "").strip()[:30],
+                 raise_from_tickets="raise_from_tickets" in request.form)
+        errors = []
+        if not v["name"] or Section.query.filter(Section.name == v["name"], Section.id != (s.id or 0)).first():
+            errors.append("Enter a section name that is not already in use.")
+        if not PREFIX.match(v["prefix"]):
+            errors.append("Ticket prefix must be 2–5 letters, e.g. REQ.")
+        if errors:  # re-show what was typed without touching the stored section
+            for e in errors:
+                flash(e, "error")
+            return render_template("admin_section_edit.html", s=SimpleNamespace(id=s.id, **v),
+                                   COLORS=SECTION_COLORS, ICONS=SECTION_ICONS), 400
+        for k, val in v.items():
+            setattr(s, k, val)
+        db.session.add(s)
+        db.session.commit()
+        flash(f"Saved {s.name}.", "success")
+        return redirect(url_for("admin.sections"))
+    return render_template("admin_section_edit.html", s=s, COLORS=SECTION_COLORS, ICONS=SECTION_ICONS)
+
+
+# ---------------------------------------------------------------- SLA rules
+
+@bp.route("/sla", methods=["GET", "POST"])
+def sla_rules():
+    """Respond / resolve targets. Rows apply to a form or a section, optionally for one priority; the most specific wins."""
+    need("form.publish")
+    cal = sla.calendar()
+    sections = all_sections()
+    forms = [f for f in Form.live().order_by(Form.name) if not f.archived]
+    rules = SlaRule.query.all()
+    if request.method == "POST":
+        cols = {k: request.form.getlist("r_" + k) for k in ("where", "priority", "respond", "resolve", "clock")}
+        new, errors = [], []
+        for i in range(len(cols["where"])):
+            v = {k: (cols[k][i].strip() if i < len(cols[k]) else "") for k in cols}
+            kind, _, ident = v["where"].partition(":")
+            target = (db.session.get(Section, int(ident)) if kind == "section" else db.session.get(Form, int(ident))) \
+                if ident.isdigit() else None
+            rtc = v["clock"] == "24x7"
+            try:
+                respond, resolve = (sla.parse_duration(v[k], cal, rtc) for k in ("respond", "resolve"))
+            except ValueError:
+                errors.append(f"Rule {i + 1}: write times like 30m, 4h or 2d.")
+                continue
+            if not target or not (respond or resolve) or v["priority"] not in ("", *PRIORITIES):
+                errors.append(f"Rule {i + 1}: choose a section or form and give at least one target.")
+                continue
+            new.append(SlaRule(section=target if kind == "section" else None, form=target if kind == "form" else None,
+                               priority=v["priority"] or None, respond_minutes=respond, resolve_minutes=resolve,
+                               round_the_clock=rtc))
+        if errors:
+            for e in errors:
+                flash(e, "error")
+        else:
+            for r in rules:
+                db.session.delete(r)
+            db.session.add_all(new)
+            db.session.commit()
+            flash("SLA rules saved. Open tickets are measured against them straight away.", "success")
+            return redirect(url_for("admin.sla_rules"))
+    rows = [dict(where=f"section:{r.section_id}" if r.section_id else f"form:{r.form_id}", priority=r.priority or "",
+                 respond=sla.format_duration(r.respond_minutes, cal, r.round_the_clock),
+                 resolve=sla.format_duration(r.resolve_minutes, cal, r.round_the_clock),
+                 clock="24x7" if r.round_the_clock else "office")
+            for r in sorted(rules, key=lambda r: (r.section_id is not None, r.form.name if r.form else "",
+                                                  PRIORITIES.index(r.priority) if r.priority else -1))]
+    return render_template("admin_sla.html", rows=rows, sections=sections, forms=forms, cal=cal)
 
 
 # ---------------------------------------------------------------- users & profiles
+
+@bp.get("/groups")
+def groups():
+    need("user.manage")
+    return render_template("admin_groups.html", groups=SupportGroup.query.order_by(SupportGroup.name).all())
+
+
+@bp.route("/groups/new", methods=["GET", "POST"])
+@bp.route("/groups/<int:gid>", methods=["GET", "POST"])
+def group_edit(gid=None):
+    """A support group: its members share a queue and are emailed when a ticket lands in it."""
+    need("user.manage")
+    grp = (db.session.get(SupportGroup, gid) or abort(404)) if gid else SupportGroup()
+    core_users = User.live().filter_by(is_core=True, active=True).order_by(User.name).all()
+    if request.method == "POST":
+        if request.form.get("action") == "delete":
+            if Ticket.query.filter_by(group_id=grp.id).first():
+                flash("Tickets are in this group's queue, so it cannot be deleted. Remove its members instead.", "error")
+                return redirect(url_for("admin.group_edit", gid=grp.id))
+            Form.query.filter_by(default_group_id=grp.id).update({"default_group_id": None})
+            db.session.delete(grp)
+            db.session.commit()
+            flash("Group deleted.", "success")
+            return redirect(url_for("admin.groups"))
+        name = request.form.get("name", "").strip()[:80]
+        if not name or SupportGroup.query.filter(SupportGroup.name == name, SupportGroup.id != (grp.id or 0)).first():
+            flash("Enter a group name that is not already in use.", "error")
+            return render_template("admin_group_edit.html", grp=grp, core_users=core_users), 400
+        chosen = set(request.form.getlist("members", type=int))
+        grp.name, grp.description = name, request.form.get("description", "").strip()[:255]
+        # core users only; members who are no longer core/active stay until removed by hand
+        grp.members = [u for u in core_users if u.id in chosen] + [u for u in grp.members if u not in core_users and u.id in chosen]
+        db.session.add(grp)
+        db.session.commit()
+        flash(f"Saved {grp.name}.", "success")
+        return redirect(url_for("admin.groups"))
+    return render_template("admin_group_edit.html", grp=grp, core_users=core_users)
+
 
 def managers_left():
     return sum(1 for u in User.query.filter_by(active=True) if u.can("user.manage"))
@@ -303,11 +486,15 @@ def user_edit(uid=None):
             u.email = email
         if password and len(password) < MIN_PASSWORD:
             errors.append(f"Passwords need at least {MIN_PASSWORD} characters.")
+        hod = request.form.get("hod_email", "").strip().lower()
+        if hod and (not EMAIL.match(hod) or hod == u.email):
+            errors.append("HOD email must be a valid address other than the user's own.")
         if errors:
             for e in errors:
                 flash(e, "error")
             return render_template("admin_user_edit.html", u=u, profiles=profiles), 400
         u.name = name
+        u.hod_email = hod or None
         u.is_core = "is_core" in request.form
         u.active = "active" in request.form or not uid
         chosen = set(request.form.getlist("profiles", type=int))
@@ -403,12 +590,17 @@ def reports():
     today = date.today()
     open_ = [t for t in tickets if t.status not in ("Closed", "Rejected")]
     closed = [t for t in tickets if t.closed_at]
+    rules, cal = SlaRule.query.all(), sla.calendar()
+    clocks = {t.id: sla.clocks(t, rules, cal) for t in [*open_, *closed]}
+    recent = [t for t in closed if t.closed_at >= utcnow() - timedelta(days=30)]
     kpis = [
         ("Open", len(open_), url_for("tickets", tab="all")),
         ("Overdue", sum(1 for t in open_ if t.due_date and t.due_date < today), url_for("tickets", tab="all", overdue=1)),
         ("Pending approval", sum(1 for t in open_ if t.status == "Pending Approval"), url_for("tickets", tab="all", status="Pending Approval")),
         ("Unassigned", sum(1 for t in open_ if not t.assignee_id), None),
-        ("Closed, last 30 days", sum(1 for t in closed if t.closed_at >= utcnow() - timedelta(days=30)), None),
+        ("Closed, last 30 days", len(recent), None),
+        ("SLA breached (open)", sum(1 for t in open_ if any(c.state == "breached" for c in clocks[t.id].values())),
+         url_for("tickets", tab="all", open=1, sla="breached")),
     ]
     rounds = defaultdict(list)
     for a in TicketApproval.query.join(Ticket).filter(Ticket.deleted_at.is_(None)):
@@ -421,9 +613,14 @@ def reports():
         "Average approval round (hours)": round(mean(approval_hours), 1) if approval_hours else "—",
     }
     groups = {
+        "Open by section": Counter(t.section.name if t.section else "No section" for t in open_),
         "Open by form": Counter(t.form_version.form.name for t in open_),
         "Open by priority": Counter(t.priority or "Not set" for t in open_),
+        "Open by support group": Counter(t.group.name if t.group else "No group" for t in open_),
         "Open by assignee": Counter(t.assignee.name if t.assignee else "Unassigned" for t in open_),
         "All by status": Counter(t.status for t in tickets),
+        **{f"{kind.title()} SLA, closed in the last 30 days": Counter(
+            f"{t.section.name if t.section else 'No section'}: {clocks[t.id][kind].state}"
+            for t in recent if kind in clocks[t.id]) for kind in ("respond", "resolve")},
     }
     return render_template("reports.html", kpis=kpis, times=times, groups=groups)

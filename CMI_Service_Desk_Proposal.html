@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CMI Service Desk Proposal</title>
+<style>
+@font-face { font-family: "72"; src: url(file:///D:/Infra/CMI/static/fonts/72-Light.woff2) format("woff2"); font-weight: 300; }
+@font-face { font-family: "72"; src: url(file:///D:/Infra/CMI/static/fonts/72-Regular.woff2) format("woff2"); font-weight: 400; }
+@font-face { font-family: "72"; src: url(file:///D:/Infra/CMI/static/fonts/72-Bold.woff2) format("woff2"); font-weight: 700; }
+@page { size: A4 landscape; margin: 0; }
+:root {
+  --text: #2b2f33; --muted: #6a6d70; --rule: #d9e1e8; --page: #eff4f9; --brand: #0a6ed1; --navy: #1d2d3e;
+  --req: #107e3e; --req-bg: #eaf6ee; --req-line: #9fd2b0;
+  --inc: #bb0000; --inc-bg: #fdecec; --inc-line: #f0a8a8;
+  --chg: #c76a00; --chg-bg: #fff4e3; --chg-line: #f1c98a;
+  --mst: #6a4cc2; --mst-bg: #f3effd; --mst-line: #c9bdf0;
+  --amber: #f0ab00;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #fff; color: var(--text); font: 400 13px/1.45 "72", Arial, sans-serif;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.page { width: 297mm; height: 210mm; padding: 13mm 15mm 11mm; position: relative; overflow: hidden; page-break-after: always; break-after: page; }
+.page:last-child { page-break-after: auto; break-after: auto; }
+.foot { position: absolute; left: 15mm; right: 15mm; bottom: 6mm; display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 4px; }
+.kicker { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--brand); }
+h1 { font-size: 26px; font-weight: 700; margin: 2px 0 4px; color: var(--navy); }
+h2 { font-size: 15px; margin: 0 0 6px; color: var(--navy); }
+h3 { font-size: 13px; margin: 0 0 4px; }
+.lead { font-size: 14px; color: var(--muted); margin: 0 0 14px; max-width: 230mm; }
+p { margin: 0 0 8px; }
+ul { margin: 0; padding-left: 18px; } li { margin: 2px 0; }
+.row { display: flex; gap: 14px; } .col { flex: 1; min-width: 0; }
+.card { border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; background: #fff; }
+.soft { background: var(--page); border-color: #d3e0ec; }
+.tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 10px; letter-spacing: .03em; }
+.t-have { background: #e5f3ea; color: var(--req); } .t-ext { background: #e7f0fb; color: var(--brand); } .t-new { background: #fff1d6; color: #9a5700; } .t-later { background: #eceef0; color: var(--muted); }
+.req { --c: var(--req); --bg: var(--req-bg); --ln: var(--req-line); }
+.inc { --c: var(--inc); --bg: var(--inc-bg); --ln: var(--inc-line); }
+.chg { --c: var(--chg); --bg: var(--chg-bg); --ln: var(--chg-line); }
+.mst { --c: var(--mst); --bg: var(--mst-bg); --ln: var(--mst-line); }
+.ico { width: 22px; height: 22px; flex: none; }
+.ico * { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; border-bottom: 2px solid var(--rule); padding: 6px 8px; }
+td { border-bottom: 1px solid var(--rule); padding: 6px 8px; vertical-align: top; }
+
+/* flow steps */
+.flow { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
+.step { display: flex; align-items: center; gap: 8px; border: 1px solid var(--ln); background: var(--bg); color: var(--text); border-radius: 6px; padding: 6px 10px; font-size: 12px; }
+.step .ico { color: var(--c); width: 18px; height: 18px; }
+.step b { font-weight: 700; }
+.down { height: 14px; display: flex; justify-content: center; }
+.down::before { content: ""; width: 2px; height: 9px; background: var(--c, #8696a7); margin-top: 0; }
+.down::after { content: ""; position: absolute; }
+.dn { position: relative; height: 14px; }
+.dn::before { content: ""; position: absolute; left: 50%; top: 0; width: 2px; height: 9px; margin-left: -1px; background: var(--c, #8696a7); }
+.dn::after { content: ""; position: absolute; left: 50%; top: 8px; margin-left: -5px; border: 5px solid transparent; border-top: 6px solid var(--c, #8696a7); border-bottom: 0; }
+.hflow { display: flex; align-items: stretch; }
+.hstep { flex: 1; border: 1px solid var(--ln); background: var(--bg); border-radius: 8px; padding: 9px 10px; font-size: 12px; position: relative; }
+.hstep .n { display: inline-flex; width: 20px; height: 20px; border-radius: 50%; background: var(--c); color: #fff; font-size: 11px; font-weight: 700; align-items: center; justify-content: center; margin-bottom: 4px; }
+.rt { width: 22px; flex: none; position: relative; }
+.rt::before { content: ""; position: absolute; top: 50%; left: 3px; right: 8px; height: 2px; margin-top: -1px; background: var(--c, #8696a7); }
+.rt::after { content: ""; position: absolute; top: 50%; right: 2px; margin-top: -5px; border: 5px solid transparent; border-left: 6px solid var(--c, #8696a7); border-right: 0; }
+
+/* cover */
+.cover { background: linear-gradient(135deg, #1d2d3e 0%, #24435f 60%, #0a6ed1 140%); color: #fff; padding: 22mm 22mm; }
+.cover .foot { color: #b9c6d3; border-color: rgba(255,255,255,.2); left: 22mm; right: 22mm; }
+.logo { display: inline-flex; align-items: center; gap: 10px; }
+.logo b { display: inline-block; background: #0f1b27; color: #fff; border-radius: 7px; padding: 4px 10px 6px; font-size: 17px; letter-spacing: .06em; border-bottom: 4px solid var(--amber); }
+.logo span { font-size: 13px; }
+
+/* mock browser */
+.mock { border: 1px solid #c4cbd2; border-radius: 8px; overflow: hidden; background: #eff4f9; box-shadow: 0 4px 14px rgba(29,45,62,.12); }
+.mock .bar { height: 30px; background: #a9c4df; display: flex; align-items: center; padding: 0 10px; gap: 10px; font-size: 11px; color: #3a4a5a; }
+.mock .bar .logo b { font-size: 11px; padding: 2px 6px 3px; border-bottom-width: 3px; border-radius: 5px; }
+.mock .bar .sp { flex: 1; }
+.mock .body { padding: 12px; }
+.field { margin-bottom: 7px; } .field label { display: block; font-size: 10.5px; color: var(--muted); margin-bottom: 2px; }
+.field .in { border: 1px solid #b0bac4; border-radius: 4px; background: #fff; height: 24px; padding: 3px 7px; font-size: 11.5px; color: var(--text); }
+.field .in.tall { height: 40px; } .field .in.sel::after { content: "▾"; float: right; color: var(--muted); }
+.field .in.hl { border: 2px solid var(--amber); background: #fffbef; }
+.btn { display: inline-block; border-radius: 5px; padding: 4px 12px; font-size: 11.5px; font-weight: 700; border: 1px solid var(--brand); color: var(--brand); background: #fff; }
+.btn.pri { background: var(--brand); color: #fff; } .btn.ok { background: var(--req); border-color: var(--req); color: #fff; } .btn.no { background: #fff; border-color: var(--inc); color: var(--inc); }
+.callout { position: relative; background: #fff8e1; border: 1px solid #f3d27a; border-radius: 6px; padding: 7px 10px; font-size: 11.5px; }
+.num { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; background: var(--amber); color: #1d2d3e; font-size: 10.5px; font-weight: 700; align-items: center; justify-content: center; flex: none; }
+
+/* desk tiles */
+.desk { border: 2px solid var(--ln); background: #fff; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+.desk .hd { background: var(--bg); padding: 10px 12px; display: flex; gap: 10px; align-items: center; border-bottom: 1px solid var(--ln); }
+.desk .hd .ico { color: var(--c); width: 30px; height: 30px; }
+.desk .hd h3 { color: var(--c); font-size: 15px; margin: 0; }
+.desk .hd small { color: var(--muted); font-size: 10.5px; display: block; }
+.desk .chips { padding: 8px 10px; display: grid; gap: 5px; }
+.chip { border: 1px solid var(--rule); border-radius: 5px; padding: 4px 8px; font-size: 11.5px; background: #fff; display: flex; justify-content: space-between; }
+.chip i { font-style: normal; color: var(--muted); }
+
+/* architecture */
+.arch { display: grid; grid-template-columns: 1fr 1fr 1fr 150px; column-gap: 12px; }
+.band { border: 1.5px solid #8fb3d6; background: #eaf2fb; border-radius: 8px; padding: 7px 12px; display: flex; align-items: center; justify-content: center; gap: 18px; font-size: 12px; }
+.side { border: 1px solid var(--rule); border-radius: 6px; padding: 5px 8px; font-size: 11px; background: #fff; display: flex; gap: 6px; align-items: center; }
+.lane { border: 2px solid var(--ln); border-radius: 9px; background: var(--bg); padding: 7px; }
+.lane h3 { color: var(--c); display: flex; gap: 6px; align-items: center; font-size: 13px; margin-bottom: 5px; }
+.lane .chip { padding: 2px 7px; font-size: 10.5px; }
+.lane .step { padding: 4px 8px; font-size: 11px; background: #fff; }
+.mlist { border: 2px solid var(--mst-line); background: var(--mst-bg); border-radius: 9px; padding: 7px; display: flex; flex-direction: column; gap: 4px; }
+.mlist h3 { color: var(--mst); font-size: 12px; margin: 0 0 2px; }
+.mlist div { background: #fff; border: 1px solid var(--mst-line); border-radius: 5px; padding: 3px 8px; font-size: 11px; }
+.big-q { font-size: 30px; font-weight: 300; color: var(--navy); line-height: 1.2; }
+</style>
+</head>
+<body>
+
+<!-- SVG icon sprite -->
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-cart" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.5 12h11.5l2-8H6.2"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17v.5"/></symbol>
+  <symbol id="i-cycle" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 1-14 5.3M4 12A8 8 0 0 1 18 6.7"/><path d="M18 2.5v4.5h-4.5M6 21.5V17h4.5"/><circle cx="12" cy="12" r="2.5"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M14 3H6v18h12V7l-4-4z"/><path d="M14 3v4h4M9 12h6M9 16h6"/></symbol>
+  <symbol id="i-flow" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5M5 17v-5h14v5"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2 20c.8-3.5 3.3-5 7-5s6.2 1.5 7 5"/><circle cx="17" cy="7" r="2.5"/><path d="M17 12.5c2.7 0 4.4 1.5 5 4.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4l2-2z"/><path d="M10 21h4"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.5 5.5a4 4 0 0 0 5 5L12 18a2.1 2.1 0 0 1-3-3l7.5-7.5a4 4 0 0 1-2-2z"/><path d="M4 20l3-3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V4M4 20h16"/><path d="M8 16v-4M12 16V8M16 16v-6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M3 5c3-1 6-1 9 1 3-2 6-2 9-1v14c-3-1-6-1-9 1-3-2-6-2-9-1V5z"/><path d="M12 6v14"/></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path d="M5 3h4l2 5-3 2a11 11 0 0 0 6 6l2-3 5 2v4a2 2 0 0 1-2 2A17 17 0 0 1 3 5a2 2 0 0 1 2-2z"/></symbol>
+  <symbol id="i-headset" viewBox="0 0 24 24"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="2.5" y="13" width="4" height="6" rx="1.5"/><rect x="17.5" y="13" width="4" height="6" rx="1.5"/><path d="M20 19c0 2-2 3-5 3h-2"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/></symbol>
+</svg>
+
+<!-- 1. COVER -->
+<section class="page cover">
+  <div class="logo"><b>CMI</b><span>Change Management Interface</span></div>
+  <div style="margin-top:34mm">
+    <div class="kicker" style="color:#f0ab00">Proposal for review</div>
+    <div style="font-size:44px;font-weight:700;line-height:1.1;margin:8px 0 12px">CMI IT Service Desk</div>
+    <div style="font-size:20px;font-weight:300;color:#d6e2ee;max-width:200mm">One portal, three desks: <b style="font-weight:700;color:#fff">IT Requests</b>, <b style="font-weight:700;color:#fff">IT Incidents</b> and <b style="font-weight:700;color:#fff">Change Management</b>, built by configuring the CMI we already have.</div>
+  </div>
+  <div class="row" style="margin-top:22mm;gap:12px;max-width:220mm">
+    <div class="col" style="border-left:4px solid #4fbf7a;padding:4px 12px"><b>IT Requests</b><br><span style="color:#b9c6d3;font-size:12px">"I need something": access, software, hardware</span></div>
+    <div class="col" style="border-left:4px solid #ff6b6b;padding:4px 12px"><b>IT Incidents</b><br><span style="color:#b9c6d3;font-size:12px">"Something is broken": fix and restore</span></div>
+    <div class="col" style="border-left:4px solid #f0ab00;padding:4px 12px"><b>Change Management</b><br><span style="color:#b9c6d3;font-size:12px">"We need to change a system": plan, approve, implement</span></div>
+  </div>
+  <div class="foot"><span>Non-technical overview for management review</span><span>October 2026</span></div>
+</section>
+
+<!-- 2. SUMMARY -->
+<section class="page">
+  <div class="kicker">1 · Summary</div>
+  <h1>What was asked, and what we propose</h1>
+  <p class="lead">The request is to see CMI as a proper IT service desk: three clearly separated sections instead of a list of form links, a flow like the reference diagram, and approval from the requester's Head of Department (HOD) by email.</p>
+  <div class="row">
+    <div class="col card soft" style="flex:.9">
+      <h2>The request</h2>
+      <ul style="font-size:13px">
+        <li>The home page should show <b>big sections</b>: end users see IT Requests and IT Incidents; core users (the IT team) also see Change Management.</li>
+        <li>Each section has its own <b>categories</b> (for example Access Request, Network Issue, Emergency Change) and its own steps from start to close.</li>
+        <li>An incident can lead to a <b>change</b> when a permanent fix is needed.</li>
+        <li>An admin keeps the <b>master settings</b>: categories, priority, SLA, workflows, approvers, support teams, statuses.</li>
+        <li>A requester types their <b>HOD's email</b>. The HOD gets a link and approves or rejects from the email.</li>
+      </ul>
+    </div>
+    <div class="col" style="flex:1.1">
+      <div class="card" style="border-left:5px solid var(--brand);margin-bottom:12px">
+        <h2 style="color:var(--brand)">The short answer: most of this is configuration</h2>
+        <p style="margin:0">CMI is already a <b>configurable</b> system. Every category becomes a <b>form</b>, and every approval chain is a <b>workflow</b>, set up by an admin on screen with no programming. Existing parts cover about two thirds of what is needed. Four additions complete it:</p>
+      </div>
+      <div class="row" style="gap:10px;flex-wrap:wrap">
+        <div class="col card" style="flex-basis:45%"><span class="tag t-new">NEW</span><h3 style="margin-top:4px">Three-section home page</h3><span style="font-size:12px;color:var(--muted)">Each form is placed in a section and shown under a large tile.</span></div>
+        <div class="col card" style="flex-basis:45%"><span class="tag t-new">NEW</span><h3 style="margin-top:4px">HOD approval by email link</h3><span style="font-size:12px;color:var(--muted)">The HOD approves with one click. No account or password is needed.</span></div>
+        <div class="col card" style="flex-basis:45%"><span class="tag t-new">NEW</span><h3 style="margin-top:4px">Support groups and SLA rules</h3><span style="font-size:12px;color:var(--muted)">Assign work to a team, with response and resolution targets for each type.</span></div>
+        <div class="col card" style="flex-basis:45%"><span class="tag t-new">NEW</span><h3 style="margin-top:4px">"Change required?" bridge</h3><span style="font-size:12px;color:var(--muted)">Raise a linked change request straight from an incident.</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>CMI IT Service Desk proposal</span><span>2</span></div>
+</section>
+
+<!-- 3. BUILDING BLOCKS -->
+<section class="page">
+  <div class="kicker">2 · How CMI is customizable</div>
+  <h1>CMI is a set of building blocks, not a fixed form</h1>
+  <p class="lead">Think of CMI as a set of building blocks. An admin uses the same few blocks to make an IT request, an incident or a change. Nothing below needs a programmer; it is all done from the Administration screens.</p>
+  <div class="row" style="gap:10px">
+    <div class="col card"><svg class="ico" style="color:var(--brand);width:30px;height:30px"><use href="#i-doc"/></svg><h3>1 · Form</h3><p style="font-size:12px">The questions to ask. The admin adds fields such as text, dropdown, date, attachment or checkbox. <b>Each category is a form.</b></p><span class="tag t-have">EXISTS</span></div>
+    <div class="col card"><svg class="ico" style="color:var(--brand);width:30px;height:30px"><use href="#i-flow"/></svg><h3>2 · Workflow</h3><p style="font-size:12px">Who approves, in which order. Stages can depend on answers, for example "only if Emergency".</p><span class="tag t-have">EXISTS</span></div>
+    <div class="col card"><svg class="ico" style="color:var(--brand);width:30px;height:30px"><use href="#i-users"/></svg><h3>3 · People and roles</h3><p style="font-size:12px">Permission profiles: requester, assignee, approver, admin. One person can hold several.</p><span class="tag t-have">EXISTS</span></div>
+    <div class="col card"><svg class="ico" style="color:var(--brand);width:30px;height:30px"><use href="#i-bell"/></svg><h3>4 · Notifications</h3><p style="font-size:12px">Who gets an email when a ticket is created, changes status or needs approval.</p><span class="tag t-have">EXISTS</span></div>
+    <div class="col card"><svg class="ico" style="color:var(--brand);width:30px;height:30px"><use href="#i-chart"/></svg><h3>5 · Tracking</h3><p style="font-size:12px">Status, priority, due date, comments, attachments, full history, reports and CSV export.</p><span class="tag t-have">EXISTS</span></div>
+  </div>
+  <h2 style="margin-top:16px">How the blocks combine into one ticket</h2>
+  <div class="hflow" style="--c:#8696a7;--ln:#c9d6e3;--bg:#f5f8fb">
+    <div class="hstep"><span class="n">1</span><br><b>Requester picks a form</b><br><span style="color:var(--muted)">e.g. "Software Installation"</span></div><div class="rt"></div>
+    <div class="hstep"><span class="n">2</span><br><b>Fills the questions</b><br><span style="color:var(--muted)">which the admin designed</span></div><div class="rt"></div>
+    <div class="hstep"><span class="n">3</span><br><b>Workflow runs</b><br><span style="color:var(--muted)">approvers are emailed in order</span></div><div class="rt"></div>
+    <div class="hstep"><span class="n">4</span><br><b>IT team works on it</b><br><span style="color:var(--muted)">assigned, prioritised, tracked</span></div><div class="rt"></div>
+    <div class="hstep"><span class="n">5</span><br><b>Closed</b><br><span style="color:var(--muted)">history kept for audit</span></div>
+  </div>
+  <div class="card soft" style="margin-top:14px;display:flex;gap:12px;align-items:center">
+    <svg class="ico" style="color:var(--brand);width:34px;height:34px"><use href="#i-gear"/></svg>
+    <div><b>Why this matters for the three sections:</b> IT Requests, IT Incidents and Change Management are not three separate programs. They are three groups of forms, each with its own questions, approvers and closing step. Adding a new category later, such as "Printer Issue", takes minutes for an admin and needs no new development.</div>
+  </div>
+  <div class="foot"><span>CMI IT Service Desk proposal</span><span>3</span></div>
+</section>
+
+<!-- 4. ARCHITECTURE -->
+<section class="page" style="padding-top:10mm">
+  <div class="kicker">3 · Proposed system architecture</div>
+  <h1 style="font-size:22px;margin-bottom:8px">How a request moves through CMI</h1>
+  <div class="row" style="gap:12px">
+   <div class="col">
+    <div class="band">
+      <span style="display:flex;gap:6px;align-items:center"><svg class="ico" style="color:var(--brand)"><use href="#i-users"/></svg><b>End users</b></span>
+      <span style="color:#8fb3d6">|</span>
+      <span style="display:flex;gap:6px;align-items:center"><svg class="ico" style="color:var(--brand)"><use href="#i-monitor"/></svg>CMI self-service portal</span>
+      <span style="color:#8fb3d6">|</span>
+      <span style="display:flex;gap:6px;align-items:center"><svg class="ico" style="color:var(--brand)"><use href="#i-mail"/></svg>Email notifications and approval links</span>
+    </div>
+    <div class="dn"></div>
+    <div class="band" style="background:#dfeaf6">
+      <span style="display:flex;gap:6px;align-items:center"><svg class="ico" style="color:var(--brand)"><use href="#i-headset"/></svg><b>Service Desk / IT support team</b></span>
+      <span style="font-size:11px;color:var(--muted)">picks up, assigns to a support group, sets priority, tracks the SLA</span>
+    </div>
+    <div style="display:flex;gap:12px"><div class="dn" style="flex:1"></div><div class="dn" style="flex:1"></div><div class="dn" style="flex:1"></div></div>
+    <div style="display:flex;gap:12px;align-items:stretch">
+    <!-- lanes -->
+    <div style="flex:1" class="lane req">
+      <h3><svg class="ico"><use href="#i-cart"/></svg>IT Requests</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:6px">
+        <div class="chip">Access request</div><div class="chip">Software install</div><div class="chip">Hardware request</div><div class="chip">IT services</div><div class="chip" style="grid-column:1/3">Other requests</div>
+      </div>
+      <div class="flow">
+        <div class="step"><svg class="ico"><use href="#i-doc"/></svg>Create service request</div><div class="dn"></div>
+        <div class="step" style="border:2px solid var(--amber)"><svg class="ico"><use href="#i-mail"/></svg><b>HOD approval (email link)</b></div><div class="dn"></div>
+        <div class="step"><svg class="ico"><use href="#i-users"/></svg>Assign to support group</div><div class="dn"></div>
+        <div class="step"><svg class="ico"><use href="#i-gear"/></svg>Fulfil request</div><div class="dn"></div>
+        <div class="step"><svg class="ico"><use href="#i-check"/></svg>Close request</div>
+      </div>
+    </div>
+    <div style="flex:1" class="lane inc">
+      <h3><svg class="ico"><use href="#i-alert"/></svg>IT Incidents</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:6px">
+        <div class="chip">IT issues</div><div class="chip">Network issues</div><div class="chip">Software issues</div><div class="chip">Hardware issues</div><div class="chip" style="grid-column:1/3">Other incidents</div>
+      </div>
+      <div class="flow">
+        <div class="step"><svg class="ico"><use href="#i-doc"/></svg>Create incident</div><div class="dn"></div>
+        <div class="step"><svg class="ico"><use href="#i-users"/></svg>Assign to support group</div><div class="dn"></div>
+        <div class="step"><svg class="ico"><use href="#i-wrench"/></svg>Diagnose and resolve</div><div class="dn"></div>
+        <div class="step" style="border:2px dashed var(--chg);background:var(--chg-bg)"><svg class="ico" style="color:var(--chg)"><use href="#i-link"/></svg><b>Change required?</b>&nbsp;→ raise change</div><div class="dn"></div>
+        <div class="step"><svg class="ico"><use href="#i-check"/></svg>Update and close</div>
+      </div>
+    </div>
+    <div style="flex:1" class="lane chg">
+      <h3><svg class="ico"><use href="#i-cycle"/></svg>Change Management <span class="tag t-new" style="margin-left:auto">CORE USERS</span></h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:6px">
+        <div class="chip">Standard change</div><div class="chip">Normal change</div><div class="chip">Emergency change</div><div class="chip">Change advisory</div><div class="chip" style="grid-column:1/3">Change calendar</div>
+      </div>
+      <div class="flow">
+        <div class="step"><svg class="ico"><use href="#i-doc"/></svg>Raise change request</div><div class="dn"></div>
+        <div class="step"><svg class="ico"><use href="#i-chart"/></svg>Impact and risk assessment</div><div class="dn"></div>
+        <div class="step"><svg class="ico"><use href="#i-flow"/></svg>Approvals (as per workflow)</div><div class="dn"></div>
+        <div class="step"><svg class="ico"><use href="#i-gear"/></svg>Plan and implement change</div><div class="dn"></div>
+        <div class="step"><svg class="ico"><use href="#i-check"/></svg>Review and close</div>
+      </div>
+    </div>
+    </div>
+    <div class="dn" style="--c:#107e3e"></div>
+    <div class="band" style="border-color:#9fd2b0;background:#eaf6ee;gap:12px">
+      <svg class="ico" style="color:var(--req);width:26px;height:26px"><use href="#i-check"/></svg><b style="font-size:14px">Resolved / Completed</b>
+      <span style="color:var(--muted)">Service request fulfilled · Incident resolved · Change implemented</span>
+      <span style="color:#9fd2b0">|</span><span style="display:flex;gap:5px;align-items:center"><svg class="ico" style="color:var(--brand)"><use href="#i-chart"/></svg>Reports and dashboard</span>
+    </div>
+    
+   </div>
+   <div style="width:150px;flex:none;display:flex;flex-direction:column;justify-content:center">
+    <div class="mlist">
+      <h3>Master Configuration<br><span style="font-weight:400;color:var(--muted)">(managed by Admin)</span></h3>
+      <div>Sections</div><div>Categories (forms)</div><div>Subcategories</div><div>Priority</div><div>SLA rules</div><div>Workflows</div><div>Approval rules (incl. HOD)</div><div>Support groups and teams</div><div>Statuses</div><div>Notifications</div>
+    </div>
+    <div style="font-size:10.5px;color:var(--muted);margin-top:6px;text-align:center">⟷ applies to every section</div>
+   </div>
+  </div>
+  <div class="foot"><span>Amber outline: HOD email approval (new). Dashed box: incident-to-change link (new).</span><span>4</span></div>
+</section>
+
+<!-- 5. HOME PAGE MOCKUP -->
+<section class="page">
+  <div class="kicker">4 · Home page</div>
+  <h1>Big sections instead of a list of links, by who you are</h1>
+  <p class="lead" style="margin-bottom:8px">Today, forms appear as a list of quick links in one box. In the new home page they are grouped under large section tiles. <b>End users</b> see only what they need: IT Requests and IT Incidents. <b>Change Management</b> is for <b>core users</b>, the IT team.</p>
+  <div class="row" style="gap:16px;align-items:flex-start">
+    <div style="flex:2;min-width:0">
+      <p style="font-size:12px;margin-bottom:4px"><span class="tag t-ext">END USER</span> <span style="color:var(--muted)">any employee, signs in with an email code</span></p>
+      <div class="mock">
+        <div class="bar"><span class="logo"><b>CMI</b></span><span>IT Service Desk</span><span class="sp"></span><span>Priya ▾</span></div>
+        <div class="body">
+          <div style="display:flex;gap:8px;margin-bottom:10px;font-size:11px">
+            <div class="card" style="padding:5px 10px;flex:1"><b style="font-size:16px">3</b> My open tickets</div>
+            <div class="card" style="padding:5px 10px;flex:1"><b style="font-size:16px">1</b> Awaiting HOD</div>
+          </div>
+          <div class="row" style="gap:10px">
+            <div class="col desk req">
+              <div class="hd"><svg class="ico"><use href="#i-cart"/></svg><div><h3>IT Requests</h3><small>Ask for access, software, hardware</small></div></div>
+              <div class="chips"><div class="chip">Access Request <i>›</i></div><div class="chip">Software Installation <i>›</i></div><div class="chip">Hardware Request <i>›</i></div><div class="chip">IT Services <i>›</i></div><div class="chip">Other Request <i>›</i></div></div>
+              <div style="padding:6px 10px 10px;font-size:10.5px;color:var(--muted);border-top:1px solid var(--rule)">My open: <b>2</b> · Awaiting HOD: <b>1</b></div>
+            </div>
+            <div class="col desk inc">
+              <div class="hd"><svg class="ico"><use href="#i-alert"/></svg><div><h3>IT Incidents</h3><small>Report something broken</small></div></div>
+              <div class="chips"><div class="chip">IT Issue <i>›</i></div><div class="chip">Network Issue <i>›</i></div><div class="chip">Software Issue <i>›</i></div><div class="chip">Hardware Issue <i>›</i></div><div class="chip">Other Incident <i>›</i></div></div>
+              <div style="padding:6px 10px 10px;font-size:10.5px;color:var(--muted);border-top:1px solid var(--rule)">My open: <b>1</b></div>
+            </div>
+          </div>
+          <div style="margin-top:8px;font-size:10.5px;color:var(--muted)">Below the tiles: My Tickets</div>
+        </div>
+      </div>
+    </div>
+    <div style="flex:3;min-width:0">
+      <p style="font-size:12px;margin-bottom:4px"><span class="tag t-new">CORE USER</span> <span style="color:var(--muted)">IT team, signs in with a password</span></p>
+      <div class="mock">
+        <div class="bar"><span class="logo"><b>CMI</b></span><span>IT Service Desk</span><span class="sp"></span><span>🔍 Search tickets</span><span>Shubham ▾</span></div>
+        <div class="body">
+          <div style="display:flex;gap:8px;margin-bottom:10px;font-size:11px">
+            <div class="card" style="padding:5px 10px;flex:1"><b style="font-size:16px">7</b> Assigned to me</div>
+            <div class="card" style="padding:5px 10px;flex:1"><b style="font-size:16px">2</b> Waiting for my approval</div>
+            <div class="card" style="padding:5px 10px;flex:1"><b style="font-size:16px">12</b> My group's queue</div>
+            <div class="card" style="padding:5px 10px;flex:1"><b style="font-size:16px;color:var(--inc)">1</b> Overdue (SLA)</div>
+          </div>
+          <div class="row" style="gap:10px">
+            <div class="col desk req">
+              <div class="hd"><svg class="ico"><use href="#i-cart"/></svg><div><h3>IT Requests</h3><small>Ask for access, software, hardware</small></div></div>
+              <div class="chips"><div class="chip">Access Request <i>›</i></div><div class="chip">Software Installation <i>›</i></div><div class="chip">Hardware Request <i>›</i></div><div class="chip">IT Services <i>›</i></div><div class="chip">Other Request <i>›</i></div></div>
+              <div style="padding:6px 10px 10px;font-size:10.5px;color:var(--muted);border-top:1px solid var(--rule)">My open: <b>2</b> · Awaiting HOD: <b>1</b></div>
+            </div>
+            <div class="col desk inc">
+              <div class="hd"><svg class="ico"><use href="#i-alert"/></svg><div><h3>IT Incidents</h3><small>Report something broken</small></div></div>
+              <div class="chips"><div class="chip">IT Issue <i>›</i></div><div class="chip">Network Issue <i>›</i></div><div class="chip">Software Issue <i>›</i></div><div class="chip">Hardware Issue <i>›</i></div><div class="chip">Other Incident <i>›</i></div></div>
+              <div style="padding:6px 10px 10px;font-size:10.5px;color:var(--muted);border-top:1px solid var(--rule)">My open: <b>1</b> · Critical: <b style="color:var(--inc)">1</b></div>
+            </div>
+            <div class="col desk chg">
+              <div class="hd"><svg class="ico"><use href="#i-cycle"/></svg><div><h3>Change Management</h3><small>Core users only</small></div></div>
+              <div class="chips"><div class="chip">Standard Change <i>›</i></div><div class="chip">Normal Change <i>›</i></div><div class="chip">Emergency Change <i>›</i></div><div class="chip">Change Calendar <i>›</i></div><div class="chip">CAB Review Queue <i>›</i></div></div>
+              <div style="padding:6px 10px 10px;font-size:10.5px;color:var(--muted);border-top:1px solid var(--rule)">Scheduled this week: <b>3</b></div>
+            </div>
+          </div>
+          <div style="margin-top:8px;font-size:10.5px;color:var(--muted)">Below the tiles: My Work · Administration · Reports (as today)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="row" style="gap:12px;margin-top:12px">
+    <div class="col callout"><b>What changes:</b> each form gets a <b>Section</b> setting, and the home page shows one large tile per section with its own colour, icon and counts.</div>
+    <div class="col callout" style="background:#eef5fc;border-color:#b8d3ee"><b>Who sees what:</b> each section has a <b>"Visible to"</b> setting: <i>everyone</i> or <i>core users only</i>. Change Management is set to core users only, so end users cannot see or raise changes.</div>
+    <div class="col callout" style="background:#eaf6ee;border-color:#9fd2b0"><b>Core users still raise requests and incidents</b> for themselves, and work on everyone's tickets. The admin can change visibility at any time without development.</div>
+  </div>
+  <div class="foot"><span>Mockup for illustration; final colours follow the existing CMI look</span><span>5</span></div>
+</section>
+
+<!-- 6. IT REQUESTS -->
+<section class="page req">
+  <div class="kicker" style="color:var(--req)">5 · Section 1</div>
+  <h1 style="color:var(--req)">IT Requests: "I need something"</h1>
+  <p class="lead">For planned needs such as access, software, hardware and services. These normally need the HOD's approval before IT acts.</p>
+  <div class="row" style="gap:16px">
+    <div class="col">
+      <h2>Categories (each one is a form)</h2>
+      <table>
+        <tr><th>Category</th><th>Example subcategories (dropdown)</th><th>Approval</th></tr>
+        <tr><td><b>Access Request</b></td><td>VPN, shared folder, application, email group</td><td>HOD</td></tr>
+        <tr><td><b>Software Installation</b></td><td>Licensed, free tool, upgrade</td><td>HOD, then IT Head if licensed</td></tr>
+        <tr><td><b>Hardware Request</b></td><td>Laptop, monitor, peripherals</td><td>HOD, then IT Head</td></tr>
+        <tr><td><b>IT Services</b></td><td>New joiner setup, email ID, backup restore</td><td>HOD</td></tr>
+        <tr><td><b>Other Request</b></td><td>Free text</td><td>HOD</td></tr>
+      </table>
+      <div class="callout" style="margin-top:10px">"<b>then IT Head if licensed</b>" is a <b>conditional stage</b>, which CMI already supports: the stage runs only when the answer on the form matches the condition.</div>
+      <h2 style="margin-top:12px">Flow</h2>
+      <div class="hflow">
+        <div class="hstep"><span class="n">1</span><br><b>Create</b></div><div class="rt"></div>
+        <div class="hstep" style="border:2px solid var(--amber)"><span class="n">2</span><br><b>HOD approves</b><br><span style="font-size:10.5px">by email link</span></div><div class="rt"></div>
+        <div class="hstep"><span class="n">3</span><br><b>Assign</b><br><span style="font-size:10.5px">to support group</span></div><div class="rt"></div>
+        <div class="hstep"><span class="n">4</span><br><b>Fulfil</b></div><div class="rt"></div>
+        <div class="hstep"><span class="n">5</span><br><b>Close</b><br><span style="font-size:10.5px">"Fulfilled"</span></div>
+      </div>
+    </div>
+    <div style="width:92mm;flex:none">
+      <h2>What the requester sees</h2>
+      <div class="mock">
+        <div class="bar"><span class="logo"><b>CMI</b></span><span>IT Requests › Access Request</span></div>
+        <div class="body" style="background:#fff">
+          <div class="field"><label>Title *</label><div class="in">VPN access for remote work</div></div>
+          <div class="row" style="gap:8px"><div class="col field"><label>Subcategory *</label><div class="in sel">VPN</div></div><div class="col field"><label>Needed by</label><div class="in">05-Nov-2026</div></div></div>
+          <div class="field"><label>Business justification *</label><div class="in tall">Working from the Pune site twice a week…</div></div>
+          <div class="field"><label>HOD email (for approval) *</label><div class="in hl">rajesh.kulkarni@jsw.in</div></div>
+          <div class="field"><label>Attachment</label><div class="in" style="color:var(--muted)">📎 Add file</div></div>
+          <div style="text-align:right"><span class="btn">Save draft</span> <span class="btn pri">Submit</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>CMI IT Service Desk proposal</span><span>6</span></div>
+</section>
+
+<!-- 7. IT INCIDENTS -->
+<section class="page inc">
+  <div class="kicker" style="color:var(--inc)">6 · Section 2</div>
+  <h1 style="color:var(--inc)">IT Incidents: "Something is broken"</h1>
+  <p class="lead">For unplanned problems. Speed matters more than approval, so incidents go straight to the support team. Priority and SLA decide how fast they must be handled.</p>
+  <div class="row" style="gap:16px">
+    <div class="col">
+      <h2>Categories</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+        <div class="chip"><b>IT Issue</b><i>login, email, printer</i></div>
+        <div class="chip"><b>Network Issue</b><i>internet, Wi-Fi, VPN</i></div>
+        <div class="chip"><b>Software Issue</b><i>crash, error</i></div>
+        <div class="chip"><b>Hardware Issue</b><i>laptop, monitor</i></div>
+        <div class="chip"><b>Other Incident</b><i>free text</i></div>
+      </div>
+      <h2>Priority from two simple questions</h2>
+      <div class="row" style="gap:12px;align-items:flex-start">
+        <table style="width:auto;font-size:11.5px">
+          <tr><th>Who is affected?</th><th>Can work continue?</th><th>Priority</th></tr>
+          <tr><td>Whole site / many users</td><td>No</td><td><b style="color:var(--inc)">Critical</b></td></tr>
+          <tr><td>A team</td><td>No</td><td><b style="color:var(--chg)">High</b></td></tr>
+          <tr><td>Just me</td><td>No</td><td><b>Medium</b></td></tr>
+          <tr><td>Anyone</td><td>Yes, with a workaround</td><td><b style="color:var(--muted)">Low</b></td></tr>
+        </table>
+        <div class="callout" style="flex:1">The service desk can still override the priority. CMI already records every priority change with a reason. The <b>SLA rule</b> for that priority then sets the response and resolution deadlines.</div>
+      </div>
+      <h2 style="margin-top:12px">Flow</h2>
+      <div class="hflow">
+        <div class="hstep"><span class="n">1</span><br><b>Report</b></div><div class="rt"></div>
+        <div class="hstep"><span class="n">2</span><br><b>Assign</b><br><span style="font-size:10.5px">to support group</span></div><div class="rt"></div>
+        <div class="hstep"><span class="n">3</span><br><b>Diagnose and resolve</b></div><div class="rt"></div>
+        <div class="hstep"><span class="n">4</span><br><b>Update and close</b><br><span style="font-size:10.5px">"Resolved"</span></div>
+      </div>
+    </div>
+    <div style="width:92mm;flex:none">
+      <h2>"Change required?" bridge</h2>
+      <div class="card" style="border:2px dashed var(--chg-line);background:var(--chg-bg)">
+        <p style="font-size:12px">Sometimes the quick fix is temporary and a permanent fix needs a change to a system, for example replacing a failing switch.</p>
+        <div class="flow chg" style="--c:var(--chg)">
+          <div class="step inc" style="background:#fff"><svg class="ico"><use href="#i-alert"/></svg><span><b>INC-0142</b> Wi-Fi drops on 2nd floor</span></div><div class="dn"></div>
+          <div class="step" style="background:#fff"><svg class="ico"><use href="#i-link"/></svg>Engineer clicks <span class="btn" style="padding:1px 7px;font-size:10.5px;border-color:var(--chg);color:var(--chg)">Raise Change</span></div><div class="dn"></div>
+          <div class="step" style="background:#fff"><svg class="ico"><use href="#i-cycle"/></svg><span><b>CHG-0031</b> created with details copied and <b>linked</b> to the incident</span></div>
+        </div>
+        <p style="font-size:11.5px;margin:8px 0 0;color:var(--muted)">Both tickets show the link. When the change is implemented, the incident team is notified so they can close the incident.</p>
+      </div>
+      <p style="font-size:11px;color:var(--muted);margin-top:8px">Linking tickets already exists in CMI. The new part is the one-click "Raise Change" button that pre-fills the form.</p>
+    </div>
+  </div>
+  <div class="foot"><span>CMI IT Service Desk proposal</span><span>7</span></div>
+</section>
+
+<!-- 8. CHANGE MANAGEMENT -->
+<section class="page chg">
+  <div class="kicker" style="color:var(--chg)">7 · Section 3</div>
+  <h1 style="color:var(--chg)">Change Management: "We need to change a system"</h1>
+  <p class="lead">Changes to servers, network, applications or configuration are planned, risk-assessed and approved before anyone touches production. The type of change decides how many approvals it needs. <b>This section is visible only to core users (the IT team)</b>; end users do not see it on their home page.</p>
+  <table style="margin-bottom:12px">
+    <tr><th style="width:17%">Change type</th><th style="width:30%">Meaning</th><th>Approval path (configured as one workflow with conditions)</th></tr>
+    <tr><td><b>Standard</b></td><td>Routine, low-risk, done many times before (e.g. add user to a group)</td><td><span class="tag t-have">PRE-APPROVED</span> No approval needed; goes straight to implementation</td></tr>
+    <tr><td><b>Normal</b></td><td>Planned change with some risk (e.g. firewall rule, server patch)</td><td>HOD → Change Advisory Board (CAB) → IT Head</td></tr>
+    <tr><td><b>Emergency</b></td><td>Urgent fix to restore service, often coming from an incident</td><td>Emergency CAB (any one member can approve) → review after the fact</td></tr>
+  </table>
+  <div class="row" style="gap:16px">
+    <div class="col">
+      <h2>Flow</h2>
+      <div class="hflow">
+        <div class="hstep"><span class="n">1</span><br><b>Raise</b><br><span style="font-size:10.5px">type, systems, reason</span></div><div class="rt"></div>
+        <div class="hstep"><span class="n">2</span><br><b>Impact and risk</b><br><span style="font-size:10.5px">downtime, rollback plan</span></div><div class="rt"></div>
+        <div class="hstep"><span class="n">3</span><br><b>Approvals</b><br><span style="font-size:10.5px">as per type</span></div><div class="rt"></div>
+        <div class="hstep"><span class="n">4</span><br><b>Implement</b><br><span style="font-size:10.5px">in planned window</span></div><div class="rt"></div>
+        <div class="hstep"><span class="n">5</span><br><b>Review and close</b><br><span style="font-size:10.5px">"Implemented"</span></div>
+      </div>
+      <div class="row" style="gap:10px;margin-top:12px">
+        <div class="col card"><h3>Form questions</h3><ul style="font-size:11.5px"><li>Change type</li><li>Systems / services affected</li><li>Reason and expected benefit</li><li>Impact and risk (Low / Medium / High)</li><li>Planned start and end, downtime yes/no</li><li>Rollback plan, test evidence (attachment)</li></ul></div>
+        <div class="col card"><h3>Already in CMI</h3><ul style="font-size:11.5px"><li>Multi-stage approvals, in order</li><li>"Any one" or "everyone" must approve, which suits the CAB</li><li>Approve, reject, or send back for changes</li><li>Approval is redone if the form is edited after approval</li></ul></div>
+      </div>
+    </div>
+    <div style="width:95mm;flex:none">
+      <h2>Change Calendar <span class="tag t-new">NEW</span></h2>
+      <div class="mock" style="background:#fff">
+        <div class="bar"><span class="logo"><b>CMI</b></span><span>Change Calendar · November 2026</span></div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);font-size:9.5px;border-top:1px solid var(--rule)">
+          <div style="padding:3px;color:var(--muted)">Mon</div><div style="padding:3px;color:var(--muted)">Tue</div><div style="padding:3px;color:var(--muted)">Wed</div><div style="padding:3px;color:var(--muted)">Thu</div><div style="padding:3px;color:var(--muted)">Fri</div><div style="padding:3px;color:var(--muted)">Sat</div><div style="padding:3px;color:var(--muted)">Sun</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);grid-auto-rows:50px;font-size:9px;line-height:1.25">
+          <div style="border:1px solid #eef1f4;padding:2px">2</div><div style="border:1px solid #eef1f4;padding:2px">3</div><div style="border:1px solid #eef1f4;padding:2px">4<div style="background:var(--chg-bg);border-left:3px solid var(--chg);padding:1px 2px">Firewall rule</div></div><div style="border:1px solid #eef1f4;padding:2px">5</div><div style="border:1px solid #eef1f4;padding:2px">6</div><div style="border:1px solid #eef1f4;padding:2px;background:#fafbfc">7<div style="background:var(--chg-bg);border-left:3px solid var(--chg);padding:1px 2px">Server patch</div></div><div style="border:1px solid #eef1f4;padding:2px;background:#fafbfc">8</div>
+          <div style="border:1px solid #eef1f4;padding:2px">9</div><div style="border:1px solid #eef1f4;padding:2px">10<div style="background:var(--inc-bg);border-left:3px solid var(--inc);padding:1px 2px">ECAB: switch</div></div><div style="border:1px solid #eef1f4;padding:2px">11</div><div style="border:1px solid #eef1f4;padding:2px">12</div><div style="border:1px solid #eef1f4;padding:2px">13</div><div style="border:1px solid #eef1f4;padding:2px;background:#fafbfc">14<div style="background:var(--chg-bg);border-left:3px solid var(--chg);padding:1px 2px">ERP upgrade</div></div><div style="border:1px solid #eef1f4;padding:2px;background:#fafbfc">15</div>
+        </div>
+      </div>
+      <p style="font-size:11.5px;margin-top:8px">Approved changes appear on their planned dates, so the CAB can spot clashes (two changes on the same system on the same night) before approving.</p>
+    </div>
+  </div>
+  <div class="foot"><span>CMI IT Service Desk proposal</span><span>8</span></div>
+</section>
+
+<!-- 9. HOD APPROVAL FLOW -->
+<section class="page">
+  <div class="kicker">8 · HOD approval by email</div>
+  <h1>The requester names their HOD, and the HOD approves from email</h1>
+  <p class="lead">The HOD does not need a CMI account or password. The email itself carries a secure, single-use approval link that is tied to that one ticket and that one email address.</p>
+  <div class="hflow" style="--c:var(--brand);--ln:#b8d3ee;--bg:#f2f7fc">
+    <div class="hstep"><span class="n">1</span><br><svg class="ico" style="color:var(--brand)"><use href="#i-doc"/></svg><br><b>Requester submits</b><br><span style="font-size:11px">and types the HOD's email in the form</span></div><div class="rt"></div>
+    <div class="hstep"><span class="n">2</span><br><svg class="ico" style="color:var(--brand)"><use href="#i-mail"/></svg><br><b>CMI emails the HOD</b><br><span style="font-size:11px">a summary of the request and an approval link</span></div><div class="rt"></div>
+    <div class="hstep"><span class="n">3</span><br><svg class="ico" style="color:var(--brand)"><use href="#i-check"/></svg><br><b>HOD opens the link</b><br><span style="font-size:11px">sees the full request, then Approve, Reject or Send back, with a comment</span></div><div class="rt"></div>
+    <div class="hstep"><span class="n">4</span><br><svg class="ico" style="color:var(--brand)"><use href="#i-flow"/></svg><br><b>Workflow continues</b><br><span style="font-size:11px">to the next approver or to the IT team</span></div><div class="rt"></div>
+    <div class="hstep"><span class="n">5</span><br><svg class="ico" style="color:var(--brand)"><use href="#i-bell"/></svg><br><b>Requester is notified</b><br><span style="font-size:11px">and the decision is saved in the ticket history</span></div>
+  </div>
+  <div class="row" style="gap:14px;margin-top:16px">
+    <div class="col card">
+      <h2 style="display:flex;gap:8px;align-items:center"><svg class="ico" style="color:var(--brand)"><use href="#i-gear"/></svg>How the admin sets it up</h2>
+      <ul style="font-size:12px">
+        <li>In the form, add a field of the new type <b>"Approver email"</b>, labelled "HOD email".</li>
+        <li>In the workflow, add a stage <b>"HOD approval"</b>, approver: <b>"email from field: HOD email"</b>.</li>
+        <li>The stage can be first, in the middle or conditional, like any other stage.</li>
+        <li>Any form in any section can use it. It is not limited to IT Requests.</li>
+      </ul>
+    </div>
+    <div class="col card">
+      <h2 style="display:flex;gap:8px;align-items:center"><svg class="ico" style="color:var(--req)"><use href="#i-shield"/></svg>Safeguards</h2>
+      <ul style="font-size:12px">
+        <li>Only <b>company email domains</b> are accepted. CMI already has this setting.</li>
+        <li>The requester <b>cannot enter their own email</b> as HOD.</li>
+        <li>The link works <b>once</b>, for <b>that ticket only</b>, and <b>expires</b> (suggested: 7 days).</li>
+        <li>If the request is edited after approval, CMI asks the HOD again, as it already does for approvals today.</li>
+      </ul>
+    </div>
+    <div class="col card">
+      <h2 style="display:flex;gap:8px;align-items:center"><svg class="ico" style="color:var(--chg)"><use href="#i-clock"/></svg>Convenience</h2>
+      <ul style="font-size:12px">
+        <li><b>Reminder</b> email if there is no decision after 2 days. The IT team can also resend it.</li>
+        <li>CMI <b>remembers</b> the last HOD each user entered and pre-fills it next time.</li>
+        <li>If the HOD is also a CMI user, the request appears in their <b>"Pending My Approval"</b> list too.</li>
+        <li>Audit: who approved, when, from which link, with what comment.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot"><span>CMI IT Service Desk proposal</span><span>9</span></div>
+</section>
+
+<!-- 10. HOD APPROVAL MOCKUPS -->
+<section class="page">
+  <div class="kicker">8 · HOD approval by email (screens)</div>
+  <h1>What the HOD sees</h1>
+  <div class="row" style="gap:18px;margin-top:10px;align-items:flex-start">
+    <div class="col">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><span class="num">A</span><b>The email in the HOD's inbox</b></div>
+      <div class="mock" style="background:#fff">
+        <div class="bar" style="background:#e8edf2"><svg class="ico" style="width:16px;height:16px"><use href="#i-mail"/></svg><span>Inbox</span></div>
+        <div style="padding:12px 14px;font-size:12px">
+          <div style="color:var(--muted);font-size:11px">From: CMI Service Desk &lt;cmi@jsw.in&gt;<br>To: rajesh.kulkarni@jsw.in</div>
+          <div style="font-weight:700;font-size:13px;margin:8px 0">Approval needed: REQ-0218 VPN access for remote work</div>
+          <p>Dear Rajesh,</p>
+          <p><b>Priya Deshmukh</b> has named you as HOD and asked for your approval:</p>
+          <table style="font-size:11.5px;margin-bottom:10px">
+            <tr><td style="color:var(--muted);width:35%">Section</td><td>IT Requests › Access Request</td></tr>
+            <tr><td style="color:var(--muted)">Subcategory</td><td>VPN</td></tr>
+            <tr><td style="color:var(--muted)">Needed by</td><td>05-Nov-2026</td></tr>
+            <tr><td style="color:var(--muted)">Justification</td><td>Working from the Pune site twice a week…</td></tr>
+          </table>
+          <div style="text-align:center;margin:10px 0"><span class="btn pri" style="padding:7px 22px;font-size:12.5px">Review and decide</span></div>
+          <p style="font-size:10.5px;color:var(--muted);margin:0">This link is for you only and expires on 04-Nov-2026. Do not forward it.</p>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><span class="num">B</span><b>The approval page (opens from the link, no login)</b></div>
+      <div class="mock">
+        <div class="bar"><span class="logo"><b>CMI</b></span><span>Approval: REQ-0218</span><span class="sp"></span><svg class="ico" style="width:14px;height:14px"><use href="#i-lock"/></svg><span>Secure link</span></div>
+        <div class="body" style="background:#fff">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:13px">VPN access for remote work</b><span class="tag" style="background:#fff1d6;color:#9a5700">PENDING HOD APPROVAL</span></div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Requested by Priya Deshmukh · 28-Oct-2026 · IT Requests › Access Request</div>
+          <div style="background:#f5f8fb;border:1px solid var(--rule);border-radius:5px;padding:7px 9px;font-size:11.5px;margin-bottom:8px">
+            Subcategory: VPN<br>Needed by: 05-Nov-2026<br>Justification: Working from the Pune site twice a week…<br>Attachment: 📎 manager_note.pdf
+          </div>
+          <div class="field"><label>Your comment (required for Reject or Send back)</label><div class="in tall"></div></div>
+          <div style="display:flex;gap:6px;justify-content:flex-end"><span class="btn no">Reject</span><span class="btn">Send back</span><span class="btn ok">Approve</span></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin:14px 0 6px"><span class="num">C</span><b>After deciding</b></div>
+      <div class="card" style="border-left:4px solid var(--req);font-size:12px"><b style="color:var(--req)">✓ Approved. Thank you.</b> Priya and the IT team have been notified. This link can no longer be used.</div>
+    </div>
+  </div>
+  <div class="foot"><span>Names and ticket numbers are examples</span><span>10</span></div>
+</section>
+
+<!-- 11. MASTER CONFIGURATION -->
+<section class="page mst">
+  <div class="kicker" style="color:var(--mst)">9 · Master configuration</div>
+  <h1>What the admin controls</h1>
+  <p class="lead" style="margin-bottom:8px">This is the purple "Master Configuration" box from the architecture page. The admin manages all of it from screens; none of it needs a developer.</p>
+  <table>
+    <tr><th style="width:19%">Master</th><th style="width:44%">What it means</th><th style="width:10%">Status</th><th>What is added</th></tr>
+    <tr><td><b>Sections</b></td><td>The big desks on the home page: name, colour, icon, order, and <b>visible to</b> everyone or core users only</td><td><span class="tag t-new">NEW</span></td><td>A section list, and a "Section" setting on each form</td></tr>
+    <tr><td><b>Categories</b></td><td>The kinds of ticket in a section, such as Access Request or Network Issue. Each is a form.</td><td><span class="tag t-have">EXISTS</span></td><td>Nothing; forms already exist and are versioned</td></tr>
+    <tr><td><b>Subcategories</b></td><td>Finer choice inside a category, such as VPN or Wi-Fi</td><td><span class="tag t-have">EXISTS</span></td><td>Nothing; this is a dropdown field in the form</td></tr>
+    <tr><td><b>Service types</b></td><td>Request, Incident or Change, which decides the default flow and closing word</td><td><span class="tag t-ext">EXTEND</span></td><td>Set on each section</td></tr>
+    <tr><td><b>Priority</b></td><td>Critical, High, Medium, Low</td><td><span class="tag t-have">EXISTS</span></td><td>Optional: impact and urgency questions that suggest a priority</td></tr>
+    <tr><td><b>SLA rules</b></td><td>Response and resolution targets per section: by category for requests, by priority for incidents, by type for changes</td><td><span class="tag t-new">NEW</span></td><td>Targets, warnings, escalation and a report (page 12). Due dates already exist.</td></tr>
+    <tr><td><b>Workflows</b></td><td>The ordered approval stages for each form, with conditions</td><td><span class="tag t-have">EXISTS</span></td><td>Nothing</td></tr>
+    <tr><td><b>Approval rules</b></td><td>Who approves each stage: named users, "any one" or "all"</td><td><span class="tag t-ext">EXTEND</span></td><td>Approver "HOD email from form" (page 9)</td></tr>
+    <tr><td><b>Support groups and teams</b></td><td>Network team, Desktop support, Application team; a ticket goes to a team and any member can pick it up</td><td><span class="tag t-new">NEW</span></td><td>Groups with members. Today a form has one default assignee.</td></tr>
+    <tr><td><b>Statuses</b></td><td>The steps a ticket passes through</td><td><span class="tag t-ext">EXTEND</span></td><td>Closing label per section: Fulfilled, Resolved or Implemented</td></tr>
+    <tr><td><b>Notifications</b></td><td>Who is emailed and when</td><td><span class="tag t-have">EXISTS</span></td><td>New events: HOD reminder, SLA about to breach</td></tr>
+    <tr><td><b>Users and permissions</b></td><td>Who can create, assign, approve, administer</td><td><span class="tag t-have">EXISTS</span></td><td>Nothing</td></tr>
+  </table>
+  <div class="foot"><span><span class="tag t-have">EXISTS</span> ready today · <span class="tag t-ext">EXTEND</span> small addition to something existing · <span class="tag t-new">NEW</span> new capability</span><span>11</span></div>
+</section>
+
+<!-- 12. SLA RULES -->
+<section class="page">
+  <div class="kicker">10 · SLA rules</div>
+  <h1>SLA rules for each type</h1>
+  <p class="lead" style="margin-bottom:10px">Each section measures something different. Incidents are about restoring service fast, requests are about delivering on time, and changes are about deciding and implementing safely. The admin can change every target below; they are suggested starting values.</p>
+  <div class="row" style="gap:12px">
+    <div class="col card req" style="border-top:5px solid var(--req);padding:10px 12px">
+      <h2 style="display:flex;gap:6px;align-items:center;color:var(--req)"><svg class="ico"><use href="#i-cart"/></svg>IT Requests</h2>
+      <p style="font-size:11.5px;color:var(--muted);margin-bottom:6px">Targets by <b>category</b>. The clock starts <b>after HOD approval</b>.</p>
+      <table style="font-size:11.5px">
+        <tr><th>Category</th><th>Respond</th><th>Fulfil</th></tr>
+        <tr><td>Access request</td><td>4 h</td><td>1 day</td></tr>
+        <tr><td>Software installation</td><td>4 h</td><td>2 days</td></tr>
+        <tr><td>Hardware request</td><td>4 h</td><td>5 days*</td></tr>
+        <tr><td>IT services</td><td>4 h</td><td>2 days</td></tr>
+        <tr><td>Other request</td><td>1 day</td><td>3 days</td></tr>
+      </table>
+      <p style="font-size:10.5px;color:var(--muted);margin:5px 0 0">* If hardware must be purchased, the clock pauses while it is "Waiting for procurement".</p>
+    </div>
+    <div class="col card inc" style="border-top:5px solid var(--inc);padding:10px 12px">
+      <h2 style="display:flex;gap:6px;align-items:center;color:var(--inc)"><svg class="ico"><use href="#i-alert"/></svg>IT Incidents</h2>
+      <p style="font-size:11.5px;color:var(--muted);margin-bottom:6px">Targets by <b>priority</b>. The clock starts <b>when the incident is reported</b>.</p>
+      <table style="font-size:11.5px">
+        <tr><th>Priority</th><th>Respond</th><th>Resolve</th><th>Hours</th></tr>
+        <tr><td><b style="color:var(--inc)">Critical</b></td><td>15 min</td><td>4 h</td><td>24×7</td></tr>
+        <tr><td><b style="color:var(--chg)">High</b></td><td>1 h</td><td>8 h</td><td>Office</td></tr>
+        <tr><td><b>Medium</b></td><td>4 h</td><td>2 days</td><td>Office</td></tr>
+        <tr><td><b style="color:var(--muted)">Low</b></td><td>1 day</td><td>5 days</td><td>Office</td></tr>
+      </table>
+      <p style="font-size:10.5px;color:var(--muted);margin:5px 0 0">"Respond" means a support person has picked up the ticket and contacted the user.</p>
+    </div>
+    <div class="col card chg" style="border-top:5px solid var(--chg);padding:10px 12px">
+      <h2 style="display:flex;gap:6px;align-items:center;color:var(--chg)"><svg class="ico"><use href="#i-cycle"/></svg>Change Management</h2>
+      <p style="font-size:11.5px;color:var(--muted);margin-bottom:6px">Targets by <b>change type</b>: how fast it is decided and closed.</p>
+      <table style="font-size:11.5px">
+        <tr><th>Type</th><th>Decision</th><th>Close after implementing</th></tr>
+        <tr><td><b>Standard</b></td><td>None (pre-approved)</td><td>Done within 2 days</td></tr>
+        <tr><td><b>Normal</b></td><td>CAB within 5 days</td><td>Review within 2 days</td></tr>
+        <tr><td><b>Emergency</b></td><td>ECAB within 2 h, 24×7</td><td>Review within 1 day</td></tr>
+      </table>
+      <p style="font-size:10.5px;color:var(--muted);margin:5px 0 0">Changes are also checked against their <b>planned window</b>: running past the planned end time is flagged.</p>
+    </div>
+  </div>
+  <h2 style="margin-top:12px">How the SLA clock works (same for all three)</h2>
+  <div class="row" style="gap:10px">
+    <div class="col card soft" style="padding:9px 11px"><h3 style="display:flex;gap:6px;align-items:center"><svg class="ico" style="color:var(--brand);width:18px;height:18px"><use href="#i-clock"/></svg>Office hours</h3><p style="font-size:11.5px;margin:0">Counted only during office hours (suggested Mon–Sat, 9:30–18:30, excluding holidays), except rows marked 24×7. "Day" means one working day.</p></div>
+    <div class="col card soft" style="padding:9px 11px"><h3 style="display:flex;gap:6px;align-items:center"><svg class="ico" style="color:var(--brand);width:18px;height:18px"><use href="#i-lock"/></svg>Clock pauses</h3><p style="font-size:11.5px;margin:0">While waiting on someone outside IT: HOD approval, "Returned" to the requester for more information, or waiting for procurement.</p></div>
+    <div class="col card soft" style="padding:9px 11px"><h3 style="display:flex;gap:6px;align-items:center"><svg class="ico" style="color:var(--chg);width:18px;height:18px"><use href="#i-bell"/></svg>Warning at 75%</h3><p style="font-size:11.5px;margin:0">Email to the assignee and the support group lead. The ticket turns amber in lists and on the home page.</p></div>
+    <div class="col card soft" style="padding:9px 11px"><h3 style="display:flex;gap:6px;align-items:center"><svg class="ico" style="color:var(--inc);width:18px;height:18px"><use href="#i-flag"/></svg>Breach at 100%</h3><p style="font-size:11.5px;margin:0">Email to the IT Head. The ticket turns red and counts as "breached" in the SLA report for each section, group and person.</p></div>
+  </div>
+  <div class="mock" style="margin-top:10px;background:#fff">
+    <div style="display:flex;align-items:center;gap:12px;padding:8px 12px;font-size:11.5px">
+      <b>INC-0142</b><span>Wi-Fi drops on 2nd floor</span><span class="tag" style="background:#fdecec;color:var(--inc)">HIGH</span>
+      <span style="flex:1"></span><span style="color:var(--muted)">Resolve by 16:30 today</span>
+      <div style="width:200px;height:8px;border-radius:4px;background:#eceef0;overflow:hidden"><div style="width:80%;height:100%;background:var(--amber)"></div></div>
+      <b style="color:#9a5700">1 h 36 min left</b>
+    </div>
+  </div>
+  <div class="foot"><span>All targets are suggestions to confirm; see decision 5</span><span>12</span></div>
+</section>
+
+<!-- 12. SCOPE vs REFERENCE -->
+<section class="page">
+  <div class="kicker">11 · Scope</div>
+  <h1>Compared with the reference (ManageEngine-style help desk)</h1>
+  <p class="lead">The full help-desk model in the reference has more modules. We start with the three that matter most and leave room for the rest.</p>
+  <div class="row" style="gap:10px">
+    <div class="col card req" style="border-top:4px solid var(--req)"><svg class="ico" style="color:var(--req)"><use href="#i-cart"/></svg><h3>Service requests</h3><span class="tag t-have">IN SCOPE</span><p style="font-size:11.5px;margin-top:6px">Section 1: IT Requests</p></div>
+    <div class="col card inc" style="border-top:4px solid var(--inc)"><svg class="ico" style="color:var(--inc)"><use href="#i-alert"/></svg><h3>Incident requests</h3><span class="tag t-have">IN SCOPE</span><p style="font-size:11.5px;margin-top:6px">Section 2: IT Incidents</p></div>
+    <div class="col card chg" style="border-top:4px solid var(--chg)"><svg class="ico" style="color:var(--chg)"><use href="#i-cycle"/></svg><h3>Change management</h3><span class="tag t-have">IN SCOPE</span><p style="font-size:11.5px;margin-top:6px">Section 3: Change Management</p></div>
+    <div class="col card" style="border-top:4px solid var(--brand)"><svg class="ico" style="color:var(--brand)"><use href="#i-chart"/></svg><h3>Reporting</h3><span class="tag t-have">IN SCOPE</span><p style="font-size:11.5px;margin-top:6px">Existing dashboard plus per-section and SLA figures</p></div>
+    <div class="col card" style="border-top:4px solid #a0a6ab"><svg class="ico" style="color:var(--muted)"><use href="#i-search"/></svg><h3>Problem management</h3><span class="tag t-later">LATER</span><p style="font-size:11.5px;margin-top:6px">Can be a 4th section ("Problems") using the same blocks</p></div>
+    <div class="col card" style="border-top:4px solid #a0a6ab"><svg class="ico" style="color:var(--muted)"><use href="#i-monitor"/></svg><h3>Asset management</h3><span class="tag t-later">LATER</span><p style="font-size:11.5px;margin-top:6px">Hardware and software register; separate module</p></div>
+  </div>
+  <div class="row" style="gap:10px;margin-top:10px">
+    <div class="col card" style="border-top:4px solid #a0a6ab;display:flex;gap:10px"><svg class="ico" style="color:var(--muted)"><use href="#i-book"/></svg><div><h3>Knowledge base <span class="tag t-later">LATER</span></h3><p style="font-size:11.5px;margin:0">FAQs and known solutions, shown when someone reports a common issue, which can reduce tickets. Useful once enough resolved incidents exist to write articles from.</p></div></div>
+    <div class="col card" style="border-top:4px solid #a0a6ab;display:flex;gap:10px"><svg class="ico" style="color:var(--muted)"><use href="#i-db"/></svg><div><h3>Configuration database (CMDB) <span class="tag t-later">LATER</span></h3><p style="font-size:11.5px;margin:0">Register of servers, network devices and applications, and how they depend on each other. For now, "Configuration Management" means the admin masters on page 11.</p></div></div>
+  </div>
+  <div class="card soft" style="margin-top:14px;display:flex;gap:14px;align-items:center">
+    <div class="big-q" style="font-size:40px;font-weight:700;color:var(--brand);white-space:nowrap">≈ ⅔</div>
+    <div><b>of the proposed system already exists in CMI today</b>: forms, multi-stage and conditional approvals, statuses, priority, assignment, linking, attachments, comments, history, notifications, permissions, reports. The work is mainly the <b>three-section home page</b>, the <b>HOD email approval</b>, <b>support groups and SLA</b>, the <b>incident-to-change button</b> and the <b>change calendar</b>.</div>
+  </div>
+  <div class="foot"><span>Reference: manageengine.com, "What is help desk software"</span><span>13</span></div>
+</section>
+
+<!-- 13. ROLLOUT -->
+<section class="page">
+  <div class="kicker">12 · Rollout</div>
+  <h1>Delivered in three steps, each usable on its own</h1>
+  <p class="lead">Each phase ends with something management can see and use. Timelines will be confirmed once the decisions on the next page are made.</p>
+  <div class="row" style="gap:12px">
+    <div class="col card" style="border-top:5px solid var(--brand)">
+      <div class="kicker">Phase 1</div><h2>The three desks</h2>
+      <ul style="font-size:12px">
+        <li>Sections master and the tiled home page: end users see 2 sections, core users see 3</li>
+        <li>All 15 category forms set up (5 per section) with their questions</li>
+        <li>Workflows for each, including Standard / Normal / Emergency change rules</li>
+        <li>Closing labels: Fulfilled, Resolved, Implemented</li>
+        <li>Per-section counts on the home page and in reports</li>
+      </ul>
+      <div class="callout" style="margin-top:8px;font-size:11.5px">Shows the customizable nature: almost all of this phase is <b>configuration</b>.</div>
+    </div>
+    <div class="col card" style="border-top:5px solid var(--amber)">
+      <div class="kicker" style="color:#9a5700">Phase 2</div><h2>HOD approval and teams</h2>
+      <ul style="font-size:12px">
+        <li>"Approver email" field and "HOD from form" workflow stage</li>
+        <li>Secure single-use email link and the approval page</li>
+        <li>Reminders, resend, and remembering the last HOD</li>
+        <li>Support groups and teams; "assign to group"; group work queues</li>
+      </ul>
+    </div>
+    <div class="col card" style="border-top:5px solid var(--req)">
+      <div class="kicker" style="color:var(--req)">Phase 3</div><h2>Service levels and linking</h2>
+      <ul style="font-size:12px">
+        <li>SLA rules for each type, 75% warnings, breach escalation and an SLA report</li>
+        <li>Incident priority from "who is affected / can work continue"</li>
+        <li>"Raise Change" from an incident (pre-filled and linked)</li>
+        <li>Change calendar</li>
+      </ul>
+    </div>
+    <div class="col card" style="border-top:5px solid #a0a6ab;background:#f7f8f9">
+      <div class="kicker" style="color:var(--muted)">Later (optional)</div><h2>Extras</h2>
+      <ul style="font-size:12px;color:var(--muted)">
+        <li>Knowledge base / FAQs</li>
+        <li>Problem management as a 4th section</li>
+        <li>Asset register / CMDB</li>
+        <li>Creating tickets from incoming email</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot"><span>CMI IT Service Desk proposal</span><span>14</span></div>
+</section>
+
+<!-- 14. DECISIONS -->
+<section class="page">
+  <div class="kicker">13 · Decisions needed</div>
+  <h1>Points to confirm before development starts</h1>
+  <table style="font-size:12.5px;margin-top:8px">
+    <tr><th style="width:4%">#</th><th style="width:38%">Question</th><th style="width:30%">Our suggestion</th><th>Why it matters</th></tr>
+    <tr><td>1</td><td>Is the HOD email <b>typed by the requester</b>, or picked from a maintained list of departments and HODs?</td><td>Typed, pre-filled with the last one used</td><td>A list needs someone to keep it up to date, while a typed email can contain mistakes. Domain checks reduce the risk.</td></tr>
+    <tr><td>2</td><td>Should the HOD approve <b>without logging in</b> (link only), or confirm with a one-time code?</td><td>Link only, single-use, expires in 7 days</td><td>A code is safer if emails get forwarded but adds a step for busy HODs. CMI's sign-in codes can be reused if wanted.</td></tr>
+    <tr><td>3</td><td>Which categories need HOD approval? Do <b>incidents</b> ever need it?</td><td>All IT Requests and Normal changes; incidents never</td><td>Approval on incidents slows down restoring service.</td></tr>
+    <tr><td>4</td><td>Who sits on the <b>Change Advisory Board</b> and the Emergency CAB? Is one approval enough, or must all approve?</td><td>CAB: all members; ECAB: any one</td><td>Sets up the change workflows.</td></tr>
+    <tr><td>5</td><td><b>SLA targets</b> for each type (page 12), office hours and holidays, and who gets escalations?</td><td>Start from page 12; Critical incidents and Emergency changes run 24×7</td><td>Decides when tickets show as overdue.</td></tr>
+    <tr><td>6</td><td>Which <b>support groups</b> exist, and who is in each?</td><td>Desktop, Network, Applications, Infra</td><td>Decides where tickets land.</td></tr>
+    <tr><td>7</td><td>Final list of <b>categories and questions</b> for each section</td><td>Start with the 15 shown here</td><td>Easy to change later; forms are versioned.</td></tr>
+  </table>
+  <div class="card soft" style="margin-top:14px;display:flex;gap:12px;align-items:center">
+    <svg class="ico" style="color:var(--brand);width:30px;height:30px"><use href="#i-flag"/></svg>
+    <div><b>Suggested next step:</b> approve Phase 1. Because it is mainly configuration, the three-section home page with working forms can be demonstrated first, before the new HOD approval is built.</div>
+  </div>
+  <div class="foot"><span>CMI IT Service Desk proposal</span><span>15</span></div>
+</section>
+
+</body>
+</html>

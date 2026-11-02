@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% from "_macros.html" import status, priority %}
+{% from "_macros.html" import status, priority, sla %}
 {% block title %}{{ t.number }}{% endblock %}
-{% block shell %}Change Request{% endblock %}
+{% block shell %}Ticket{% endblock %}
 {% block body %}
 {% set can_assign = g.user.can('ticket.assign') %}
 {% set can_edit = g.user.can('ticket.edit') %}
 {% set can_link = g.user.can('ticket.link') %}
 {% set show_work = can_assign or can_set_priority or can_edit or can_submit %}
 <div class="obj-header">
-  <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> / <a href="{{ url_for('tickets') }}">Change Requests</a> / {{ t.number }}</div>
+  <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> / <a href="{{ url_for('tickets') }}">Tickets</a> / {{ t.number }}</div>
   <div class="obj-title">
     <div>
       <h1>{{ t.title }}</h1>
@@ -16,9 +16,15 @@
     </div>
     <div class="actions">
       {% if can_edit_values %}<a class="btn" href="{{ url_for('ticket_edit', tid=t.id) }}">Edit</a>{% endif %}
-      {% if g.user.can('ticket.create') and not t.form_version.form.archived and not t.form_version.form.deleted_at and t.form_version.form.latest %}
+      {% if g.user.can('ticket.create') and t.form_version.form.visible_to(g.user) and not t.form_version.form.archived and not t.form_version.form.deleted_at and t.form_version.form.latest %}
       <a class="btn transparent" href="{{ url_for('ticket_new', form=t.form_version.form.key, **{'from': t.id, 'link': 'follow_up_to'}) }}">Create Follow-up</a>
       <a class="btn transparent" href="{{ url_for('ticket_new', form=t.form_version.form.key, **{'from': t.id, 'link': 'child_of'}) }}">Create Child</a>
+      {% endif %}
+      {% if raise_forms and t.status not in ('Closed', 'Rejected') %}
+      <form method="get" action="{{ url_for('ticket_new') }}" class="inline">
+        <input type="hidden" name="from" value="{{ t.id }}"><input type="hidden" name="link" value="change_for">
+        <select name="form" aria-label="Type of change">{% for f in raise_forms %}<option value="{{ f.key }}">{{ f.name }}</option>{% endfor %}</select>
+        <button class="btn" type="submit">Raise Change</button></form>
       {% endif %}
       {% if g.user.can('ticket.delete') %}
       <form method="post" action="{{ url_for('ticket_delete', tid=t.id) }}" class="inline"
@@ -28,12 +34,21 @@
     </div>
   </div>
   <dl class="kv">
-    <div><dt>Status</dt><dd>{{ status(t.status) }}</dd></div>
+    <div><dt>Status</dt><dd>{{ status(t.status, t.status_label) }}</dd></div>
     <div><dt>Priority</dt><dd>{{ priority(t.priority) }}
       {% for r in t.open_priority_requests %}<span class="sub muted">Requested from {{ r.requested_to.name }}</span>{% endfor %}</dd></div>
     <div><dt>Requester</dt><dd>{{ t.requester.name }}</dd></div>
-    <div><dt>Assignee</dt><dd>{{ t.assignee.name if t.assignee else 'Unassigned' }}</dd></div>
+    <div><dt>Group</dt><dd>{{ t.group.name if t.group else '—' }}</dd></div>
+    <div><dt>Assignee</dt><dd>{{ t.assignee.name if t.assignee else 'Unassigned' }}
+      {% if t.group and g.user in t.group.members and not t.assignee and t.status not in ('Closed', 'Rejected') %}
+      <form method="post" action="{{ url_for('ticket_take', tid=t.id) }}" class="inline">
+        <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="rv" value="{{ t.row_version }}">
+        <button class="btn" type="submit">Take it</button></form>{% endif %}</dd></div>
     <div><dt>Due Date</dt><dd>{{ t.due_date|d }}</dd></div>
+    {% for kind, c in clocks.items() %}
+    <div><dt>SLA · {{ kind|title }}</dt><dd>{{ sla(c) }}<span class="sla-bar {{ c.state }}"><i style="width: {{ [c.ratio * 100, 100]|min|round }}%"></i></span>
+      <span class="sub muted">{% if c.due and c.left <= 600 %}by {{ c.due|localdt }}{% elif c.paused %}clock paused while {{ t.status|lower }}{% else %}target {{ c.target|mins }}{% endif %}</span></dd></div>
+    {% endfor %}
     <div><dt>Created</dt><dd>{{ t.created_at|dt }}</dd></div>
   </dl>
   <nav class="anchors">
@@ -80,6 +95,9 @@
       <form class="panel pad" method="post" action="{{ url_for('ticket_assign', tid=t.id) }}">
         <h3>Assignment</h3>
         <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="rv" value="{{ t.row_version }}">
+        <div class="field"><label for="group">Support Group</label>
+          <select id="group" name="group_id"><option value="">None</option>
+            {% for gr in groups %}<option value="{{ gr.id }}" {% if gr.id == t.group_id %}selected{% endif %}>{{ gr.name }}</option>{% endfor %}</select></div>
         <div class="field"><label for="assignee">Assignee</label>
           <select id="assignee" name="assignee_id"><option value="">Unassigned</option>
             {% for u in core_users %}<option value="{{ u.id }}" {% if u.id == t.assignee_id %}selected{% endif %}>{{ u.name }}</option>{% endfor %}</select></div>
@@ -166,7 +184,12 @@
           {% for a in rows %}
           <tr>
             <td>{{ a.stage_index + 1 }} · {{ a.stage_name }}<span class="sub">{{ 'one approver needed' if a.mode == 'any' else 'all approvers needed' }}</span></td>
-            <td>{{ a.approver.name }}</td>
+            <td>{{ a.approver.name }}{% if a.via_email %}<span class="sub">{{ a.approver.email }} · by email link</span>
+              {% if a in current and not a.decision and (g.user.id == t.requester_id or g.user.can('ticket.assign')) %}
+              <form method="post" action="{{ url_for('approval_resend', tid=t.id, aid=a.id) }}">
+                <input type="hidden" name="_csrf" value="{{ csrf }}">
+                <button class="btn transparent" type="submit" title="Sent {{ a.link_sent_at|dt }}">Resend link</button></form>
+              {% endif %}{% endif %}</td>
             <td>{% if a.decision == 'approved' %}<span class="status positive">Approved</span>
               {% elif a.decision == 'rejected' %}<span class="status negative">Rejected</span>
               {% elif a.decision == 'returned' %}<span class="status critical">Returned</span>
@@ -196,7 +219,7 @@
           <tr>
             <td>{{ label }}</td>
             <td>{% if can_view(other) %}<a href="{{ url_for('ticket_detail', tid=other.id) }}">{{ other.number }}</a> · {{ other.title }}{% else %}{{ other.number }}{% endif %}</td>
-            <td>{{ status(other.status) }}</td>
+            <td>{{ status(other.status, other.status_label) }}</td>
             {% if can_link %}<td class="right">
               <form method="post" action="{{ url_for('ticket_unlink', tid=t.id, lid=lk.id) }}">
                 <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn transparent" type="submit">Remove</button>
@@ -211,7 +234,7 @@
       <input type="hidden" name="_csrf" value="{{ csrf }}">
       <div><label for="kind">This request is</label>
         <select id="kind" name="kind">{% for k, labels in LINK_KINDS.items() %}<option value="{{ k }}">{{ labels[0] }}</option>{% endfor %}</select></div>
-      <div><label for="number">Request number</label><input id="number" name="number" placeholder="CHG-0001" required></div>
+      <div><label for="number">Request number</label><input id="number" name="number" placeholder="INC-0001" required></div>
       <button class="btn" type="submit">Add Link</button>
     </form>
     {% endif %}

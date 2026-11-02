@@ -97,11 +97,11 @@ def test_home_lives_at_slash_home_and_slash_still_works(mail):
 
 def test_form_link_survives_otp_login(mail):
     c = cmi.app.test_client()
-    assert c.get("/tickets/new?form=INFRA_CHANGE").location == "/login"
+    assert c.get("/tickets/new?form=ACCESS_REQUEST").location == "/login"
     post(c, "/login/otp/send", email="req@corp.com")
     code = re.search(r"\b(\d{6})\b", mail[-1][2]).group(1)
-    assert post(c, "/login/otp/verify", code=code).location == "/tickets/new?form=INFRA_CHANGE"
-    assert c.get("/tickets/new?form=INFRA_CHANGE").status_code == 200
+    assert post(c, "/login/otp/verify", code=code).location == "/tickets/new?form=ACCESS_REQUEST"
+    assert c.get("/tickets/new?form=ACCESS_REQUEST").status_code == 200
     c.get("/logout")
     assert post(c, "/login/core", email="admin@cmi.local", password="pw-test-123").location == "/home"  # used once
 
@@ -420,6 +420,297 @@ def test_admin_soft_deletes_a_request(mail):
     assert "Remove me" not in admin.get("/tickets?tab=all&export=csv").get_data(as_text=True)
     with cmi.app.app_context():
         assert ticket(gone).deleted_at and ticket(gone).title == "Remove me"  # still in the database
+
+
+# ---------------------------------------------------------------- sections (home page tiles)
+
+ACCESS = {"title": "VPN access", "subcategory": "VPN", "system": "Corp VPN", "justification": "Remote work",
+          "hod_email": "hod@corp.com"}
+
+
+def hod_link(mail, to="hod@corp.com"):
+    """Path of the newest approval link mailed to the HOD."""
+    body = next(m[2] for m in reversed(mail) if m[0] == to and "/approve/" in m[2])
+    return re.search(r"(/approve/[\w-]+)", body).group(1)
+
+
+def test_end_users_see_requests_and_incidents_but_not_change_management(mail):
+    req = requester(mail)
+    home = req.get("/home").get_data(as_text=True)
+    assert "<h2>IT Requests</h2>" in home and "<h2>IT Incidents</h2>" in home and "<h2>Change Management</h2>" not in home
+    assert "Normal Change" not in req.get("/tickets/new").get_data(as_text=True)  # catalogue hides it too
+    assert req.get("/tickets/new?form=NORMAL_CHANGE").status_code == 403
+    assert post(req, "/tickets/new?form=NORMAL_CHANGE", title="x").status_code == 403  # not just hidden: refused
+    core_home = login("engineer@cmi.local").get("/home").get_data(as_text=True)
+    assert all(f"<h2>{s}</h2>" in core_home for s in ("IT Requests", "IT Incidents", "Change Management"))
+
+
+def test_ticket_numbered_and_closed_by_section(mail):
+    req = requester(mail)
+    tid = create(req, form="ACCESS_REQUEST", **ACCESS)
+    page = req.get(f"/tickets/{tid}").get_data(as_text=True)
+    assert f"REQ-{tid:04d}" in page
+    admin = login("admin@cmi.local")
+    assert f"REQ-{tid:04d}" in admin.get(f"/tickets?tab=all&q=REQ-{tid:04d}").get_data(as_text=True)
+    post(cmi.app.test_client(), hod_link(mail), decision="approved")
+    post(admin, f"/tickets/{tid}/status", status="Closed", rv=rv(tid))
+    assert ">Fulfilled<" in admin.get(f"/tickets/{tid}").get_data(as_text=True)
+    with cmi.app.app_context():
+        assert ticket(tid).status == "Closed"  # the label is display only; filters and reports still see Closed
+
+
+def test_admin_manages_sections(mail):
+    admin = login("admin@cmi.local")
+    assert post(admin, "/admin/sections/new", name="IT Requests", prefix="REQ").status_code == 400  # name taken
+    assert post(admin, "/admin/sections/new", name="Problems", prefix="P1").status_code == 400  # letters only
+    r = post(admin, "/admin/sections/new", name="Problems", prefix="prb", visible_to="core", closed_label="Solved",
+             color="purple", icon="gear", position="4")
+    assert r.status_code == 302
+    with cmi.app.app_context():
+        from models import Form, Section
+        s = Section.query.filter_by(name="Problems").one()
+        assert (s.prefix, s.core_only, s.closed_label) == ("PRB", True, "Solved")
+        sid, fid = s.id, Form.query.filter_by(key="OTHER_INCIDENT").one().id
+    page = admin.get(f"/admin/forms/{fid}").get_data(as_text=True)
+    assert "Problems (core users only)" in page
+    fields = [("f_" + k, v) for k, v in {"id": "description", "label": "What happened?", "type": "textarea"}.items()]
+    admin.post(f"/admin/forms/{fid}", data=MultiDict([("_csrf", "test-token"), ("name", "Other Incident"),
+                                                       ("section_id", str(sid)), ("action", "save"), *fields]))
+    assert "Other Incident" not in requester(mail).get("/home").get_data(as_text=True)  # now core users only
+    assert post(admin, f"/admin/sections/{sid}", action="delete").status_code == 302
+    assert "Move this section" in admin.get(f"/admin/sections/{sid}").get_data(as_text=True)  # still has a form
+
+
+# ---------------------------------------------------------------- HOD approval by email link
+
+def test_hod_approves_from_email_link_without_signing_in(mail):
+    req = requester(mail)
+    tid = create(req, form="ACCESS_REQUEST", **ACCESS)
+    with cmi.app.app_context():
+        assert ticket(tid).status == "Pending Approval"  # the form starts approval on submit
+    link = hod_link(mail)
+    hod = cmi.app.test_client()  # nobody signed in
+    assert "VPN access" in hod.get(link).get_data(as_text=True)
+    assert "can no longer be used" in post(hod, link, decision="approved").get_data(as_text=True)
+    with cmi.app.app_context():
+        t = ticket(tid)
+        assert t.status == "Approved" and t.approvals[0].approver.email == "hod@corp.com" and t.approvals[0].via_email
+        assert TicketHistory.query.filter_by(ticket_id=tid, action="approved").one().actor.email == "hod@corp.com"
+    assert any(m[0] == "req@corp.com" and "approved" in m[1] for m in mail)
+    assert hod.get(link).status_code == 410  # works once
+
+
+def test_hod_must_comment_to_reject_or_send_back(mail):
+    tid = create(requester(mail), form="ACCESS_REQUEST", **ACCESS)
+    hod, link = cmi.app.test_client(), hod_link(mail)
+    assert "Add a comment" in post(hod, link, decision="returned").get_data(as_text=True)
+    post(hod, link, decision="returned", comment="Which VPN profile?")
+    with cmi.app.app_context():
+        assert ticket(tid).status == "Returned"
+
+
+def test_hod_email_rules_and_remembered(mail, monkeypatch):
+    req = requester(mail)
+    r = post(req, "/tickets/new?form=ACCESS_REQUEST", **{**ACCESS, "hod_email": "req@corp.com"})
+    assert r.status_code == 200 and "not your own" in r.get_data(as_text=True)
+    monkeypatch.setitem(cmi.app.config, "ALLOWED_EMAIL_DOMAINS", ["corp.com"])
+    r = post(req, "/tickets/new?form=ACCESS_REQUEST", **{**ACCESS, "hod_email": "boss@gmail.com"})
+    assert "company email address" in r.get_data(as_text=True)
+    create(req, form="ACCESS_REQUEST", **ACCESS)
+    page = req.get("/tickets/new?form=SOFTWARE_INSTALL").get_data(as_text=True)  # any form with a HOD field
+    assert 'value="hod@corp.com"' in page and "Remembered from your last request" in page
+    admin = login("admin@cmi.local")
+    with cmi.app.app_context():
+        from models import PermissionProfile
+        requester_profile = str(PermissionProfile.query.filter_by(name="Requester").one().id)
+    post(admin, f"/admin/users/{uid('req@corp.com')}", name="Req", hod_email="new.hod@corp.com", active="on",
+         profiles=requester_profile)
+    assert 'value="new.hod@corp.com"' in req.get("/tickets/new?form=ACCESS_REQUEST").get_data(as_text=True)
+
+
+def test_resend_replaces_the_link_and_reminders_go_out(mail):
+    from datetime import timedelta
+    from models import TicketApproval, utcnow
+    req = requester(mail)
+    tid = create(req, form="ACCESS_REQUEST", **ACCESS)
+    old = hod_link(mail)
+    with cmi.app.app_context():
+        aid = TicketApproval.query.filter_by(ticket_id=tid).one().id
+    post(req, f"/tickets/{tid}/approvals/{aid}/resend")  # too soon: refused
+    assert hod_link(mail) == old
+
+    def age(**fields):
+        with cmi.app.app_context():
+            row = db.session.get(TicketApproval, aid)
+            for k, v in fields.items():
+                setattr(row, k, v)
+            db.session.commit()
+    age(link_sent_at=utcnow() - timedelta(hours=1))
+    post(req, f"/tickets/{tid}/approvals/{aid}/resend")
+    new = hod_link(mail)
+    assert new != old and cmi.app.test_client().get(old).status_code == 410
+    assert cmi.app.test_client().get(new).status_code == 200
+    age(link_expires=utcnow() - timedelta(minutes=1))
+    assert "expired" in cmi.app.test_client().get(new).get_data(as_text=True)
+    age(link_sent_at=utcnow() - timedelta(days=3))
+    result = cmi.app.test_cli_runner().invoke(args=["remind-approvers"])
+    assert "Sent 1 reminder" in result.output
+    assert mail[-1][0] == "hod@corp.com" and mail[-1][1].startswith("Reminder:")
+    assert cmi.app.test_client().get(hod_link(mail)).status_code == 200  # the reminder carries a fresh link
+
+
+# ---------------------------------------------------------------- support groups
+
+INCIDENT = {"title": "Outlook keeps crashing", "subcategory": "Email", "affected": "Just me", "can_work": "No",
+            "description": "Since this morning"}
+
+
+def test_support_group_queue_and_take(mail):
+    tid = create(requester(mail), form="IT_ISSUE", **INCIDENT)
+    with cmi.app.app_context():
+        assert ticket(tid).group.name == "Service Desk" and ticket(tid).assignee is None
+    assert any(m[0] == "engineer@cmi.local" and "Service Desk queue" in m[1] for m in mail)
+    eng = login("engineer@cmi.local")
+    assert f"INC-{tid:04d}" in eng.get("/tickets?tab=group").get_data(as_text=True)
+    assert post(login("lead@cmi.local"), f"/tickets/{tid}/take", rv=rv(tid)).status_code == 403  # not a member
+    post(eng, f"/tickets/{tid}/take", rv=rv(tid))
+    with cmi.app.app_context():
+        assert ticket(tid).assignee.email == "engineer@cmi.local"
+    assert post(login("assigner@cmi.local"), f"/tickets/{tid}/take", rv=rv(tid)).status_code == 403  # already taken
+
+
+def test_admin_creates_support_group(mail):
+    admin = login("admin@cmi.local")
+    assert post(admin, "/admin/groups/new", name="Service Desk").status_code == 400  # name taken
+    assert post(admin, "/admin/groups/new", name="Applications", members=str(uid("lead@cmi.local"))).status_code == 302
+    assert "Neha Lead" in admin.get("/admin/groups").get_data(as_text=True)
+
+
+# ---------------------------------------------------------------- SLA
+
+def test_office_hours_maths():
+    from datetime import date, datetime, time, timedelta
+    import sla
+    cal = sla.Calendar(time(9, 30), time(18, 30), {0, 1, 2, 3, 4, 5}, set(), timedelta(minutes=330))  # Mon-Sat, IST
+    mon = date(2026, 11, 2)
+    assert mon.weekday() == 0
+    utc = lambda d, h, m=0: datetime.combine(d, time(h, m))
+    assert sla.working_minutes(utc(mon, 4), utc(mon, 5), cal) == 60  # 09:30-10:30 IST
+    sat = mon + timedelta(days=5)
+    assert sla.working_minutes(utc(sat, 12), utc(mon + timedelta(days=7), 5), cal) == 120  # Sat 17:30-18:30 + Mon 9:30-10:30
+    assert sla.add_working(utc(sat, 12), 120, cal) == utc(mon + timedelta(days=7), 5)  # Sunday skipped
+    cal.holidays.add(mon + timedelta(days=7))
+    assert sla.working_minutes(utc(sat, 12), utc(mon + timedelta(days=7), 5), cal) == 60  # holiday Monday
+    assert sla.working_minutes(utc(mon, 4), utc(mon, 5), cal, round_the_clock=True) == 60
+    assert (sla.parse_duration("2d", cal), sla.parse_duration("30m", cal), sla.parse_duration("1d", cal, True)) == (1080, 30, 1440)
+    with pytest.raises(ValueError):
+        sla.parse_duration("soon", cal)
+
+
+def test_clock_pauses_while_waiting():
+    from datetime import datetime, timedelta
+    from types import SimpleNamespace as NS
+    import sla
+    t0 = datetime(2026, 11, 2, 4, 0)
+    at = lambda m: t0 + timedelta(minutes=m)
+    t = NS(created_at=t0, history=[NS(field="status", at=at(10), new="Pending Approval"),
+                                   NS(field="status", at=at(70), new="In Progress"), NS(field="status", at=at(100), new="Closed")])
+    assert sla.running_intervals(t, at(200)) == [(t0, at(10)), (at(70), at(100))]
+
+
+def test_incident_priority_from_answers_and_sla_shown(mail):
+    req = requester(mail)
+    tid = create(req, form="IT_ISSUE", **{**INCIDENT, "affected": "Whole site / many users"})
+    with cmi.app.app_context():
+        assert ticket(tid).priority == "Critical"  # whole site + cannot work
+    eng = login("engineer@cmi.local")
+    page = eng.get(f"/tickets/{tid}").get_data(as_text=True)
+    assert "SLA · Respond" in page and "SLA · Resolve" in page
+    post(eng, f"/tickets/{tid}/take", rv=rv(tid))
+    with cmi.app.app_context():
+        assert ticket(tid).responded_at  # taking it is the response
+    tid2 = create(req, form="IT_ISSUE", **{**INCIDENT, "can_work": "Yes, with a workaround"})
+    with cmi.app.app_context():
+        assert ticket(tid2).priority == "Low"
+
+
+def test_sla_check_warns_then_escalates_once(mail):
+    from datetime import timedelta
+    tid = create(requester(mail), form="IT_ISSUE", **{**INCIDENT, "affected": "Whole site / many users"})  # 15m / 4h, 24x7
+
+    def age(minutes):
+        with cmi.app.app_context():
+            ticket(tid).created_at -= timedelta(minutes=minutes)
+            db.session.commit()
+    run = lambda: cmi.app.test_cli_runner().invoke(args=["sla-check"]).output
+    age(30)  # respond (15 min) breached; resolve at 30 / 240 min: fine
+    del mail[:]
+    assert "Sent 1 SLA alert" in run()
+    to = {m[0] for m in mail}
+    assert {"assigner@cmi.local", "engineer@cmi.local"} <= to  # the Service Desk group: nobody is assigned yet
+    assert "admin@cmi.local" in to  # System Administrator has sla.escalate
+    assert all("respond breached" in m[1] for m in mail)
+    assert "Sent 0" in run()  # each alert goes out once
+    age(180)  # resolve now at 210 / 240 min: warning, not escalated
+    del mail[:]
+    assert "Sent 1 SLA alert" in run()
+    assert mail and all("resolve" in m[1] and "breaching" in m[1] for m in mail) and "admin@cmi.local" not in {m[0] for m in mail}
+
+
+def test_on_hold_pauses_the_clock(mail):
+    tid = create(requester(mail), form="IT_ISSUE", **INCIDENT)
+    eng = login("engineer@cmi.local")
+    post(eng, f"/tickets/{tid}/status", status="On Hold", rv=rv(tid))
+    assert "clock paused while on hold" in eng.get(f"/tickets/{tid}").get_data(as_text=True)
+
+
+def test_raise_change_from_incident(mail):
+    req = requester(mail)
+    iid = create(req, form="NETWORK_ISSUE", **{**INCIDENT, "subcategory": "Wi-Fi", "location": "Tower B"})
+    assert "Raise Change" not in req.get(f"/tickets/{iid}").get_data(as_text=True)  # end users can't raise changes
+    eng = login("engineer@cmi.local")
+    assert "Raise Change" in eng.get(f"/tickets/{iid}").get_data(as_text=True)
+    url = f"/tickets/new?form=EMERGENCY_CHANGE&from={iid}&link=change_for"
+    assert f'value="INC-{iid:04d}"' in eng.get(url).get_data(as_text=True)  # incident number carried over
+    r = post(eng, url, title="Replace Wi-Fi controller", incident=f"INC-{iid:04d}", systems="Network",
+             reason="Controller failing", planned_start="2026-11-20T22:00", rollback_plan="Old controller")
+    cid = int(r.location.rsplit("/", 1)[1])
+    with cmi.app.app_context():
+        lk = TicketLink.query.filter_by(from_ticket_id=cid).one()
+        assert (lk.to_ticket_id, lk.kind) == (iid, "change_for")
+    del mail[:]
+    post(login("admin@cmi.local"), f"/tickets/{cid}/status", status="Closed", rv=rv(cid))
+    assert any(m[0] == "engineer@cmi.local" and "You can now resolve" in m[2] for m in mail)  # the incident's group
+
+
+def test_change_calendar(mail):
+    eng = login("engineer@cmi.local")
+    create(eng, form="NORMAL_CHANGE", title="Core switch firmware", systems="Network", reason="Bug fix", risk="Medium",
+           planned_start="2026-11-20T22:00", planned_end="2026-11-20T23:00", rollback_plan="Previous image",
+           hod_email="hod@corp.com")
+    assert "Core switch firmware" in eng.get("/changes/calendar?month=2026-11").get_data(as_text=True)
+    assert "Core switch firmware" not in eng.get("/changes/calendar?month=2026-12").get_data(as_text=True)
+    assert requester(mail).get("/changes/calendar").status_code == 403
+
+
+def test_admin_edits_sla_rules(mail):
+    admin = login("admin@cmi.local")
+    with cmi.app.app_context():
+        from models import Section, SlaRule
+        sid = Section.query.filter_by(name="IT Incidents").one().id
+        before = SlaRule.query.count()
+    form = lambda respond: MultiDict([("_csrf", "test-token"), ("r_where", f"section:{sid}"), ("r_priority", "High"),
+                                      ("r_respond", respond), ("r_resolve", "1d"), ("r_clock", "office")])
+    with admin.session_transaction() as s:
+        s["_csrf"] = "test-token"
+    assert "write times like" in admin.post("/admin/sla", data=form("soon"), follow_redirects=True).get_data(as_text=True)
+    with cmi.app.app_context():
+        assert SlaRule.query.count() == before  # nothing saved
+    admin.post("/admin/sla", data=form("2h"))
+    with cmi.app.app_context():
+        (r,) = SlaRule.query.all()
+        assert (r.section_id, r.priority, r.respond_minutes, r.resolve_minutes) == (sid, "High", 120, 540)
+    assert 'value="2h"' in admin.get("/admin/sla").get_data(as_text=True)
 
 
 # ---------------------------------------------------------------- export & backup

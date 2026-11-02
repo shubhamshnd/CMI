@@ -81,6 +81,31 @@ a:hover { text-decoration: underline; }
 .group li { margin: 0 0 18px; font-size: 17px; }
 .group .count { margin-left: 6px; color: var(--muted); font-size: 14px; }
 
+/* Home: KPI strip and section tiles ("desks"). Each desk-<colour> sets --c (accent), --bg (header) and --ln (border). */
+.home-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; max-width: 1400px; }
+.home-kpi { padding: 10px 14px; color: var(--muted); }
+.home-kpi:hover { text-decoration: none; border-color: var(--brand); }
+.home-kpi b { font-size: 22px; font-weight: 400; color: var(--text); margin-right: 4px; }
+.home-kpi b.alert { color: var(--negative); }
+.desks { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-top: 24px; max-width: 1400px; }
+.desk { --c: var(--neutral); --bg: #f2f3f4; --ln: #c9cdd1; display: flex; flex-direction: column;
+  background: var(--surface); border: 2px solid var(--ln); border-radius: 10px; overflow: hidden; }
+.desk-green { --c: #107e3e; --bg: #eaf6ee; --ln: #9fd2b0; }
+.desk-red { --c: #bb0000; --bg: #fdecec; --ln: #f0a8a8; }
+.desk-amber { --c: #c76a00; --bg: #fff4e3; --ln: #f1c98a; }
+.desk-blue { --c: #0a6ed1; --bg: #eaf2fb; --ln: #a9c8ea; }
+.desk-purple { --c: #6a4cc2; --bg: #f3effd; --ln: #c9bdf0; }
+.desk header { display: flex; gap: 14px; align-items: center; padding: 16px 18px; background: var(--bg); border-bottom: 1px solid var(--ln); }
+.desk .icon { width: 40px; height: 40px; flex: none; fill: none; stroke: var(--c); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.desk h2 { margin: 0; font-size: 22px; font-weight: 700; color: var(--c); }
+.desk header p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+.desk ul { list-style: none; margin: 0; padding: 12px 14px; display: grid; gap: 8px; flex: 1; align-content: start; }
+.desk li a { display: flex; justify-content: space-between; padding: 9px 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); }
+.desk li a:hover { text-decoration: none; border-color: var(--c); color: var(--c); }
+.desk li span { color: var(--muted); }
+.desk footer { padding: 10px 16px; border-top: 1px solid var(--border); font-size: 14px; }
+.desk footer a { color: var(--muted); }
+
 /* ---------- Generic blocks ---------- */
 .title { font-size: 24px; font-weight: 300; margin: 0 0 4px; }
 .subtitle { color: var(--muted); margin: 0 0 20px; }
@@ -260,3 +285,22 @@ td.center input[type=checkbox] { width: auto; height: auto; }
   .group h2 { font-size: 26px; }
   .shell-title { font-size: 15px; }
 }
+
+/* SLA progress bar on the ticket page */
+.sla-bar { display: block; width: 160px; height: 6px; margin-top: 4px; border-radius: 3px; background: #e5e8eb; overflow: hidden; }
+.sla-bar i { display: block; height: 100%; background: var(--info); }
+.sla-bar.warning i { background: var(--critical); }
+.sla-bar.breached i, .sla-bar.missed i { background: var(--negative); }
+.sla-bar.met i { background: var(--positive); }
+.sla-bar.paused i { background: var(--neutral); }
+
+/* Change calendar */
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-left: 1px solid var(--border); border-top: 1px solid var(--border); }
+.cal > div { min-height: 96px; padding: 6px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--surface); font-size: 13px; }
+.cal > .head { min-height: 0; color: var(--muted); background: transparent; }
+.cal > .out { background: #f6f7f8; color: var(--muted); }
+.cal a { display: block; margin-top: 4px; padding: 2px 6px; border-left: 3px solid var(--critical); background: #fff4e3; color: var(--text);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cal a.pending { border-left-color: var(--neutral); background: #f2f3f4; }
+.cal a.emergency { border-left-color: var(--negative); background: #fdecec; }
+.obj-title .actions select { width: auto; }

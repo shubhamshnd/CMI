@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}SLA Rules{% endblock %}
+{% block shell %}Administration{% endblock %}
+{% macro rule(r) %}
+<div class="row panel builder-row">
+  <div class="builder-grid">
+    <div class="wide"><label>Applies to</label><select name="r_where">
+      <optgroup label="Whole section">{% for s in sections %}<option value="section:{{ s.id }}" {% if r.where == 'section:' ~ s.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}</optgroup>
+      <optgroup label="One form">{% for f in forms %}<option value="form:{{ f.id }}" {% if r.where == 'form:' ~ f.id %}selected{% endif %}>{{ f.name }}{{ ' (' ~ f.section.name ~ ')' if f.section }}</option>{% endfor %}</optgroup>
+    </select></div>
+    <div><label>Priority</label><select name="r_priority"><option value="">Any</option>
+      {% for p in PRIORITIES %}<option {% if p == r.priority %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+    <div><label>Respond within</label><input name="r_respond" value="{{ r.respond }}" placeholder="e.g. 4h"></div>
+    <div><label>Resolve within</label><input name="r_resolve" value="{{ r.resolve }}" placeholder="e.g. 2d"></div>
+    <div><label>Clock</label><select name="r_clock"><option value="office">Office hours</option>
+      <option value="24x7" {% if r.clock == '24x7' %}selected{% endif %}>24×7</option></select></div>
+  </div>
+  <div class="row-actions">
+    <button class="btn transparent reject" data-act="del">Remove</button>
+  </div>
+</div>
+{% endmacro %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  <p class="subtitle">Targets for responding to and resolving tickets. Write times as <b>30m</b>, <b>4h</b> or <b>2d</b>
+    (a day is one office day of {{ cal.day_minutes|mins }}, or 24 hours for a 24×7 rule).
+    When several rules fit a ticket, the most specific wins: form + priority, then form, then section + priority, then section.</p>
+  <p class="hint">Office hours {{ config.OFFICE_HOURS }}, {{ config.OFFICE_DAYS }}{% if config.HOLIDAYS %}, except {{ config.HOLIDAYS }}{% endif %}
+    (set in .env). The clock pauses while a ticket is waiting for approval, returned to the requester, or On Hold.
+    Warnings go out at 75% and escalations at 100% when <code>flask --app app sla-check</code> runs.</p>
+  <form method="post" data-rows>
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <div class="rows">{% for r in rows %}{{ rule(r) }}{% endfor %}</div>
+    <template>{{ rule({}) }}</template>
+    <div class="actions">
+      <button class="btn" data-act="add">Add Rule</button>
+      <span class="grow"></span>
+      <button class="btn emph" type="submit">Save SLA Rules</button>
+    </div>
+  </form>
+</main>
+{% endblock %}

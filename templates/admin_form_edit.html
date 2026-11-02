@@ -6,7 +6,7 @@
   <div class="builder-grid">
     <div><label>Label</label><input name="f_label" value="{{ f.label }}" maxlength="120"></div>
     <div><label>ID</label><input name="f_id" value="{{ f.id }}" maxlength="40" placeholder="lower_case_id"></div>
-    <div><label>Type</label><select name="f_type">{% for ty in ['text', 'textarea', 'select', 'multi_select', 'date', 'datetime', 'number', 'checkbox', 'file', 'image', 'section'] %}<option {% if ty == f.type %}selected{% endif %}>{{ ty }}</option>{% endfor %}</select></div>
+    <div><label>Type</label><select name="f_type">{% for ty in FIELD_TYPES %}<option {% if ty == f.type %}selected{% endif %}>{{ ty }}</option>{% endfor %}</select></div>
     <div><label>Required</label><select name="f_required"><option value="no">No</option><option value="yes" {% if f.required %}selected{% endif %}>Yes</option></select></div>
     <div><label title="Changing this field after approval restarts approval">Material</label><select name="f_material"><option value="no">No</option><option value="yes" {% if f.material %}selected{% endif %}>Yes</option></select></div>
     <div class="wide" data-for="select multi_select"><label>Options (comma separated)</label><input name="f_options" value="{{ (f.options or [])|join(', ') }}"></div>
@@ -39,6 +39,10 @@
     <div class="panel pad inline-form">
       <div><label for="name" class="req">Name</label><input id="name" name="name" value="{{ name }}" maxlength="120" required></div>
       <div class="grow"><label for="description">Description</label><input id="description" name="description" value="{{ form.description }}" maxlength="255"></div>
+      <div><label for="section_id">Section (home page tile)</label>
+        <select id="section_id" name="section_id"><option value="">None (Other Requests)</option>
+          {% for s in sections %}<option value="{{ s.id }}" {% if s.id == form.section_id %}selected{% endif %}>{{ s.name }}{% if s.core_only %} (core users only){% endif %}</option>{% endfor %}</select></div>
+      <div><label for="position">Order in section</label><input id="position" name="position" type="number" min="0" max="999" value="{{ form.position }}"></div>
     </div>
     <p class="hint">Every request also has a Title. Fields keep their ID across versions; changing an ID creates a new field.</p>
     <div class="rows">{% for f in fields %}{{ row(f) }}{% endfor %}</div>

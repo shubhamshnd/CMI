@@ -6,7 +6,7 @@ from sqlalchemy.engine import Engine
 
 db = SQLAlchemy()
 
-STATUSES = ["New", "In Progress", "Pending Approval", "Returned", "Approved", "Rejected", "Closed"]
+STATUSES = ["New", "In Progress", "On Hold", "Pending Approval", "Returned", "Approved", "Rejected", "Closed"]
 PRIORITIES = ["Critical", "High", "Medium", "Low"]
 
 # Every permission key the app checks. Profiles are editable lists of these.
@@ -24,16 +24,23 @@ PERMISSIONS = {
     "form.publish": "Build and publish forms, configure workflows",
     "user.manage": "Manage users and permission profiles",
     "report.view": "View reports and export",
+    "sla.escalate": "Receive SLA breach escalations",
 }
 
+# approver_email: the requester types someone's email (e.g. their HOD); a workflow stage can send them an approval link.
 FIELD_TYPES = ["text", "textarea", "select", "multi_select", "date", "datetime", "number", "checkbox",
-               "file", "image", "section"]
+               "file", "image", "section", "approver_email"]
+
+# Home page section tiles: colour themes and icons the admin can pick from (styled in fiori.css / _macros.icon).
+SECTION_COLORS = ["green", "red", "amber", "blue", "purple", "grey"]
+SECTION_ICONS = ["cart", "alert", "cycle", "doc", "gear", "users"]
 
 LINK_KINDS = {  # kind: (label from the linking ticket, label from the linked ticket)
     "child_of": ("Child of", "Parent of"),
     "related": ("Related to", "Related to"),
     "duplicate_of": ("Duplicate of", "Has duplicate"),
     "follow_up_to": ("Follow-up to", "Has follow-up"),
+    "change_for": ("Change for", "Change raised"),  # a change raised from an incident or request
 }
 
 
@@ -59,6 +66,7 @@ class User(db.Model):
     active = db.Column(db.Boolean, default=True, nullable=False)
     failed_logins = db.Column(db.Integer, default=0, nullable=False)
     locked_until = db.Column(db.DateTime)
+    hod_email = db.Column(db.String(255))  # remembered from their last request; pre-fills "approver email" fields
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
     deleted_at = db.Column(db.DateTime)  # soft delete: hidden everywhere; restore by clearing it (and setting active) in the DB
     profiles = db.relationship("PermissionProfile", secondary="user_profile", back_populates="users")
@@ -104,11 +112,47 @@ ticket_watcher = db.Table(
 )
 
 
+group_member = db.Table(
+    "group_member",
+    db.Column("group_id", db.ForeignKey("support_group.id"), primary_key=True),
+    db.Column("user_id", db.ForeignKey("user.id"), primary_key=True),
+)
+
+
+class SupportGroup(db.Model):
+    """A team (Service Desk, Network Team…) whose members share a queue: any member can take a ticket from it."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    description = db.Column(db.String(255), default="", nullable=False)
+    members = db.relationship("User", secondary="group_member", order_by="User.name")
+
+
+class Section(db.Model):
+    """A big tile on the home page (IT Requests, IT Incidents, Change Management) grouping forms."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    description = db.Column(db.String(255), default="", nullable=False)
+    prefix = db.Column(db.String(5), nullable=False)  # ticket numbers: REQ-0012
+    color = db.Column(db.String(20), default="blue", nullable=False)  # see SECTION_COLORS
+    icon = db.Column(db.String(20), default="doc", nullable=False)  # see SECTION_ICONS
+    position = db.Column(db.Integer, default=0, nullable=False)
+    core_only = db.Column(db.Boolean, default=False, nullable=False)  # hidden from end users (non-core)
+    closed_label = db.Column(db.String(30), default="", nullable=False)  # shown instead of "Closed", e.g. Fulfilled
+    # Offer this section's forms as "Raise …" on tickets of other sections (Change Management: "Raise Change")
+    raise_from_tickets = db.Column(db.Boolean, default=False, nullable=False, server_default="0")
+    forms = db.relationship("Form", back_populates="section")
+
+    def visible_to(self, user):
+        return user.is_core or not self.core_only
+
+
 class Form(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     key = db.Column(db.String(60), unique=True, nullable=False)
     name = db.Column(db.String(120), nullable=False)
     description = db.Column(db.String(255), default="", nullable=False)
+    section_id = db.Column(db.ForeignKey("section.id"))  # None = listed under "Other" for everyone
+    position = db.Column(db.Integer, default=0, nullable=False, server_default="0")  # order within its section tile
     draft = db.Column(db.JSON, default=lambda: {"fields": []}, nullable=False)  # edited freely, published as a version
     archived = db.Column(db.Boolean, default=False, nullable=False)
     # Approval stages: [{"name", "mode": "any"|"all", "approvers": [user ids], "condition": {"field", "equals"} | None}]
@@ -116,13 +160,22 @@ class Form(db.Model):
     # Form-level subscribers: [{"user_id": 3, "events": ["new", "comment", "status", "update"]}] (see core.EVENTS)
     notify = db.Column(db.JSON, default=list, nullable=False, server_default="[]")
     default_assignee_id = db.Column(db.ForeignKey("user.id"))
+    default_group_id = db.Column(db.ForeignKey("support_group.id"))
+    auto_submit = db.Column(db.Boolean, default=False, nullable=False, server_default="0")  # start approval on create
+    # Priority set on create from the answers: [{"when": [{"field", "equals"}, ...], "priority": "High"}], first match wins
+    priority_rules = db.Column(db.JSON, default=list, nullable=False, server_default="[]")
     deleted_at = db.Column(db.DateTime)  # soft delete: hidden everywhere; restore by clearing it in the DB
     versions = db.relationship("FormVersion", order_by="FormVersion.version", back_populates="form")
+    section = db.relationship("Section", back_populates="forms")
+    default_group = db.relationship("SupportGroup")
 
     @classmethod
     def live(cls):
         return cls.query.filter(cls.deleted_at.is_(None))
     default_assignee = db.relationship("User")
+
+    def visible_to(self, user):
+        return not self.section or self.section.visible_to(user)
 
     @property
     def latest(self):
@@ -150,11 +203,13 @@ class Ticket(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
     form_version_id = db.Column(db.ForeignKey("form_version.id"), nullable=False)
+    section_id = db.Column(db.ForeignKey("section.id"))  # the form's section when created: keeps the number stable
     values = db.Column(db.JSON, default=dict, nullable=False)
     status = db.Column(db.String(30), default="New", nullable=False)
     priority = db.Column(db.String(20))  # None = not set yet
     requester_id = db.Column(db.ForeignKey("user.id"), nullable=False)
     assignee_id = db.Column(db.ForeignKey("user.id"))
+    group_id = db.Column(db.ForeignKey("support_group.id"))  # the team whose queue it is in
     due_date = db.Column(db.Date)
     row_version = db.Column(db.Integer, default=1, nullable=False)   # bumped on every change: conflict detection
     data_version = db.Column(db.Integer, default=1, nullable=False)  # bumped when form values change: what approvers reviewed
@@ -162,11 +217,15 @@ class Ticket(db.Model):
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow, nullable=False)
     closed_at = db.Column(db.DateTime)
+    responded_at = db.Column(db.DateTime)  # first time IT picked it up: assigned, worked on or answered (SLA "respond")
+    sla_alerts = db.Column(db.JSON, default=list, nullable=False, server_default="[]")  # e.g. ["resolve-warn"]: mailed once
     deleted_at = db.Column(db.DateTime)  # soft delete: hidden everywhere; restore by clearing it in the DB
 
     form_version = db.relationship("FormVersion")
+    section = db.relationship("Section")
     requester = db.relationship("User", foreign_keys=[requester_id])
     assignee = db.relationship("User", foreign_keys=[assignee_id])
+    group = db.relationship("SupportGroup")
     comments = db.relationship("Comment", order_by="Comment.created_at")
     history = db.relationship("TicketHistory", order_by="TicketHistory.id.desc()")
     priority_requests = db.relationship("PriorityRequest", order_by="PriorityRequest.created_at.desc()",
@@ -182,7 +241,12 @@ class Ticket(db.Model):
 
     @property
     def number(self):
-        return f"CHG-{self.id:04d}"
+        return f"{self.section.prefix if self.section else 'CHG'}-{self.id:04d}"
+
+    @property
+    def status_label(self):
+        """Status as shown to people: a section may call "Closed" e.g. "Fulfilled" or "Resolved"."""
+        return self.section.closed_label if self.status == "Closed" and self.section and self.section.closed_label else self.status
 
     @property
     def open_priority_requests(self):
@@ -224,6 +288,11 @@ class TicketApproval(db.Model):
     data_version = db.Column(db.Integer)  # ticket data version the approver reviewed
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
     decided_at = db.Column(db.DateTime)
+    # Approver named by email on the request (e.g. the requester's HOD): decides through an emailed link, no sign-in.
+    via_email = db.Column(db.Boolean, default=False, nullable=False, server_default="0")
+    token_hash = db.Column(db.String(64), index=True)  # sha256 of the link's token; cleared once used
+    link_sent_at = db.Column(db.DateTime)
+    link_expires = db.Column(db.DateTime)
 
     ticket = db.relationship("Ticket", back_populates="approvals")
     approver = db.relationship("User")
@@ -264,6 +333,20 @@ class Comment(db.Model):
     body = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
     author = db.relationship("User")
+
+
+class SlaRule(db.Model):
+    """Respond / resolve targets in minutes. Applies to a form, or to a section; optionally only for one priority.
+    The most specific matching rule wins (see sla.rule_for)."""
+    id = db.Column(db.Integer, primary_key=True)
+    section_id = db.Column(db.ForeignKey("section.id"))
+    form_id = db.Column(db.ForeignKey("form.id"))
+    priority = db.Column(db.String(20))  # None = any priority
+    respond_minutes = db.Column(db.Integer)
+    resolve_minutes = db.Column(db.Integer)
+    round_the_clock = db.Column(db.Boolean, default=False, nullable=False)  # 24x7 instead of office hours
+    section = db.relationship("Section")
+    form = db.relationship("Form")
 
 
 class TicketHistory(db.Model):

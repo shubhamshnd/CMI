@@ -6,6 +6,8 @@
   <div class="builder-grid">
     <div><label>Stage name</label><input name="s_name" value="{{ s.name }}" maxlength="120"></div>
     <div><label>Needs</label><select name="s_mode"><option value="any">One approver</option><option value="all" {% if s.mode == 'all' %}selected{% endif %}>All approvers</option></select></div>
+    <div><label>Approver</label><select name="s_field"><option value="">People listed here</option>
+      {% for fid, f in email_fields.items() %}<option value="{{ fid }}" {% if s.approver_field == fid %}selected{% endif %}>Email typed in “{{ f.label }}”</option>{% endfor %}</select></div>
     <div class="wide"><label>Approver emails (comma separated)</label><input name="s_approvers" value="{% for a in s.approvers %}{{ names.get(a, '') }}{{ ', ' if not loop.last }}{% endfor %}" list="approver-emails"></div>
     <div><label>Only when field</label><select name="s_cond_field"><option value="">Always</option>
       {% for fid, f in schema_fields.items() %}<option value="{{ fid }}" {% if s.condition and s.condition.field == fid %}selected{% endif %}>{{ f.label }}</option>{% endfor %}</select></div>
@@ -18,29 +20,62 @@
   </div>
 </div>
 {% endmacro %}
+{% macro field_select(name, chosen) %}<select name="{{ name }}"><option value="">—</option>
+  {% for fid, f in schema_fields.items() %}<option value="{{ fid }}" {% if chosen == fid %}selected{% endif %}>{{ f.label }}</option>{% endfor %}</select>{% endmacro %}
+{% macro prule(r) %}
+{% set w = r.when or [] %}
+<div class="row panel builder-row">
+  <div class="builder-grid">
+    <div><label>When field</label>{{ field_select('p_field1', w[0].field if w|length > 0) }}</div>
+    <div><label>…is</label><input name="p_value1" value="{{ w[0].equals if w|length > 0 else '' }}"></div>
+    <div><label>and field</label>{{ field_select('p_field2', w[1].field if w|length > 1) }}</div>
+    <div><label>…is</label><input name="p_value2" value="{{ w[1].equals if w|length > 1 else '' }}"></div>
+    <div><label>Priority</label><select name="p_priority">{% for p in PRIORITIES %}<option {% if p == r.priority %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+  </div>
+  <div class="row-actions">
+    <button class="btn transparent" data-act="up" aria-label="Move up">↑</button>
+    <button class="btn transparent" data-act="down" aria-label="Move down">↓</button>
+    <button class="btn transparent reject" data-act="del">Remove</button>
+  </div>
+</div>
+{% endmacro %}
 {% block body %}
 <main class="page">
   {% include "_admin_nav.html" %}
   {% include "_form_tabs.html" %}
-  <p class="subtitle">Stages run in order. Each stage needs one or all of its approvers. A stage with a condition only applies when the request's field has that value.</p>
+  <p class="subtitle">Stages run in order. Each stage needs one or all of its approvers. A stage with a condition only applies when the request's field has that value.
+    A stage can instead go to the person whose email the requester typed (an “approver email” field, e.g. their HOD): they get a single-use link and decide without signing in.</p>
 
-  <form method="post" data-rows>
+  <form method="post">
     <input type="hidden" name="_csrf" value="{{ csrf }}">
     <div class="panel pad inline-form">
       <div><label for="da">Default assignee for new requests</label>
         <select id="da" name="default_assignee_id"><option value="">None</option>
           {% for u in core_users %}<option value="{{ u.id }}" {% if u.id == form.default_assignee_id %}selected{% endif %}>{{ u.name }}</option>{% endfor %}</select></div>
+      <div><label for="dg">Default support group</label>
+        <select id="dg" name="default_group_id"><option value="">None</option>
+          {% for gr in groups %}<option value="{{ gr.id }}" {% if gr.id == form.default_group_id %}selected{% endif %}>{{ gr.name }}</option>{% endfor %}</select></div>
+      <label class="check"><input type="checkbox" name="auto_submit" {% if form.auto_submit %}checked{% endif %}> Start approval as soon as a request is submitted</label>
     </div>
-    <h2 class="section-title">Approval Stages</h2>
-    <div class="rows">{% for s in stages %}{{ stage(s) }}{% endfor %}</div>
-    <template>{{ stage({'approvers': [], 'mode': 'any'}) }}</template>
-    <datalist id="approver-emails">{% for u in approvers %}<option value="{{ u.email }}">{{ u.name }}</option>{% endfor %}</datalist>
-    <p class="hint">Users with approval permission: {% for u in approvers %}{{ u.name }} ({{ u.email }}){{ ', ' if not loop.last }}{% else %}none — give someone the Approver profile first{% endfor %}.</p>
-    <div class="actions">
-      <button class="btn" data-act="add">Add Stage</button>
-      <span class="grow"></span>
-      <button class="btn emph" type="submit">Save Workflow</button>
+
+    <div data-rows>
+      <h2 class="section-title">Approval Stages</h2>
+      <div class="rows">{% for s in stages %}{{ stage(s) }}{% endfor %}</div>
+      <template>{{ stage({'approvers': [], 'mode': 'any'}) }}</template>
+      <datalist id="approver-emails">{% for u in approvers %}<option value="{{ u.email }}">{{ u.name }}</option>{% endfor %}</datalist>
+      <p class="hint">Users with approval permission: {% for u in approvers %}{{ u.name }} ({{ u.email }}){{ ', ' if not loop.last }}{% else %}none — give someone the Approver profile first{% endfor %}.</p>
+      <div class="actions"><button class="btn" data-act="add">Add Stage</button></div>
     </div>
+
+    <div data-rows>
+      <h2 class="section-title">Automatic Priority</h2>
+      <p class="hint">Set the priority of a new request from its answers. The first matching rule wins; the service desk can still change it.</p>
+      <div class="rows">{% for r in priority_rules %}{{ prule(r) }}{% endfor %}</div>
+      <template>{{ prule({}) }}</template>
+      <div class="actions"><button class="btn" data-act="add">Add Rule</button></div>
+    </div>
+
+    <div class="actions spaced"><span class="grow"></span><button class="btn emph" type="submit">Save Workflow</button></div>
   </form>
 </main>
 {% endblock %}

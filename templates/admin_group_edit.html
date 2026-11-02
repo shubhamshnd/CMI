@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ grp.name or 'New Group' }}{% endblock %}
+{% block shell %}Administration{% endblock %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  <form class="panel pad narrow" method="post">
+    <h1 class="title">{{ grp.name if grp.id else 'New Support Group' }}</h1>
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <div class="field"><label for="name" class="req">Name</label><input id="name" name="name" value="{{ grp.name or '' }}" maxlength="80" required></div>
+    <div class="field"><label for="description">Description</label><input id="description" name="description" value="{{ grp.description or '' }}" maxlength="255"></div>
+    <fieldset class="field">
+      <legend>Members (core users)</legend>
+      {% for u in core_users %}
+      <label class="check"><input type="checkbox" name="members" value="{{ u.id }}" {% if u in grp.members %}checked{% endif %}> {{ u.name }} <span class="muted small">{{ u.email }}</span></label>
+      {% endfor %}
+      {% for u in grp.members if u not in core_users %}
+      <label class="check"><input type="checkbox" name="members" value="{{ u.id }}" checked> {{ u.name }} <span class="muted small">(no longer an active core user)</span></label>
+      {% endfor %}
+    </fieldset>
+    <div class="actions">
+      <a class="btn transparent" href="{{ url_for('admin.groups') }}">Cancel</a>
+      <button class="btn emph" type="submit">Save</button>
+    </div>
+  </form>
+  {% if grp.id %}
+  <form class="narrow spaced actions" method="post" data-confirm="Delete the group “{{ grp.name }}”?">
+    <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="action" value="delete">
+    <button class="btn transparent reject" type="submit">Delete Group</button>
+  </form>
+  {% endif %}
+</main>
+{% endblock %}

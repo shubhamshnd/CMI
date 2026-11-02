@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ s.name or 'New Section' }}{% endblock %}
+{% block shell %}Administration{% endblock %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  <form class="panel pad narrow" method="post">
+    <h1 class="title">{{ s.name if s.id else 'New Section' }}</h1>
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <div class="field"><label for="name" class="req">Name</label><input id="name" name="name" value="{{ s.name or '' }}" maxlength="80" required></div>
+    <div class="field"><label for="description">Description (shown on the tile)</label><input id="description" name="description" value="{{ s.description or '' }}" maxlength="255"></div>
+    <fieldset class="field">
+      <legend>Visible to</legend>
+      <label class="check"><input type="radio" name="visible_to" value="everyone" {% if not s.core_only %}checked{% endif %}> Everyone</label>
+      <label class="check"><input type="radio" name="visible_to" value="core" {% if s.core_only %}checked{% endif %}> Core users only (the IT team; end users cannot see or raise these forms)</label>
+    </fieldset>
+    <div class="field"><label for="prefix" class="req">Ticket number prefix</label>
+      <input id="prefix" name="prefix" value="{{ s.prefix or '' }}" maxlength="5" pattern="[A-Za-z]{2,5}" placeholder="REQ" required>
+      <div class="hint">New tickets are numbered like REQ-0012. Existing tickets keep their number.</div></div>
+    <div class="field"><label for="closed_label">“Closed” shows as</label>
+      <input id="closed_label" name="closed_label" value="{{ s.closed_label or '' }}" maxlength="30" placeholder="Fulfilled, Resolved, Implemented…"></div>
+    <div class="field"><label class="check"><input type="checkbox" name="raise_from_tickets" {% if s.raise_from_tickets %}checked{% endif %}>
+      Offer this section's forms on other tickets (e.g. “Raise Change” on an incident; core users only)</label></div>
+    <div class="field"><label for="color">Colour</label>
+      <select id="color" name="color">{% for c in COLORS %}<option {% if c == s.color %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="icon">Icon</label>
+      <select id="icon" name="icon">{% for i in ICONS %}<option {% if i == s.icon %}selected{% endif %}>{{ i }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="position">Order on the home page</label><input id="position" name="position" type="number" value="{{ s.position }}" min="0" max="999"></div>
+    <div class="actions">
+      <a class="btn transparent" href="{{ url_for('admin.sections') }}">Cancel</a>
+      <button class="btn emph" type="submit">Save</button>
+    </div>
+  </form>
+  {% if s.id %}
+  <form class="narrow spaced actions" method="post" data-confirm="Delete the section “{{ s.name }}”?">
+    <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="action" value="delete">
+    <button class="btn transparent reject" type="submit">Delete Section</button>
+  </form>
+  {% endif %}
+</main>
+{% endblock %}

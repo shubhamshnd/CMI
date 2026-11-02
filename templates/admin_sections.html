@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Sections{% endblock %}
+{% block shell %}Administration{% endblock %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  <div class="panel table-wrap">
+    <div class="table-toolbar"><h3>Sections ({{ sections|length }})</h3>
+      <div class="actions"><a class="btn" href="{{ url_for('admin.section_edit') }}">New Section</a></div></div>
+    <table>
+      <thead><tr><th>Order</th><th>Section</th><th>Visible to</th><th>Ticket numbers</th><th>Closed shows as</th><th>Forms</th></tr></thead>
+      <tbody>
+        {% for s in sections %}
+        <tr>
+          <td>{{ s.position }}</td>
+          <td><a href="{{ url_for('admin.section_edit', sid=s.id) }}">{{ s.name }}</a><span class="sub">{{ s.description }}</span></td>
+          <td>{{ 'Core users only' if s.core_only else 'Everyone' }}</td>
+          <td>{{ s.prefix }}-0001</td>
+          <td>{{ s.closed_label or 'Closed' }}</td>
+          <td>{{ s.forms|rejectattr('deleted_at')|sort(attribute='position')|map(attribute='name')|join(', ') or '—' }}</td>
+        </tr>
+        {% else %}<tr><td colspan="6" class="empty">No sections yet. Every form is listed under “Other Requests”.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="hint">Each section is a tile on the home page. Put a form in a section from the form's Fields page.</p>
+</main>
+{% endblock %}

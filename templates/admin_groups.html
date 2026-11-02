@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Support Groups{% endblock %}
+{% block shell %}Administration{% endblock %}
+{% block body %}
+<main class="page">
+  {% include "_admin_nav.html" %}
+  <div class="panel table-wrap">
+    <div class="table-toolbar"><h3>Support Groups ({{ groups|length }})</h3>
+      <div class="actions"><a class="btn" href="{{ url_for('admin.group_edit') }}">New Group</a></div></div>
+    <table>
+      <thead><tr><th>Group</th><th>Members</th></tr></thead>
+      <tbody>
+        {% for gr in groups %}
+        <tr><td><a href="{{ url_for('admin.group_edit', gid=gr.id) }}">{{ gr.name }}</a><span class="sub">{{ gr.description }}</span></td>
+          <td>{{ gr.members|map(attribute='name')|join(', ') or '—' }}</td></tr>
+        {% else %}<tr><td colspan="2" class="empty">No support groups yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="hint">New tickets land in a form's default group (set on the form's Workflow tab). Members are emailed, see it under “My Groups' Queue”, and any of them can take it.</p>
+</main>
+{% endblock %}

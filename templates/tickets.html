@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% from "_macros.html" import status, priority %}
-{% block title %}Change Requests{% endblock %}
-{% block shell %}Change Requests{% endblock %}
+{% from "_macros.html" import status, priority, sla %}
+{% block title %}Tickets{% endblock %}
+{% block shell %}Tickets{% endblock %}
 {% block body %}
 <main class="page">
-  <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> / Change Requests</div>
+  <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> / Tickets</div>
 
   <form class="panel filterbar" method="get">
     <input type="hidden" name="tab" value="{{ tab }}">
-    <div><label for="q">Search</label><input id="q" name="q" type="search" value="{{ request.args.q }}" placeholder="CHG-0001 or title"></div>
+    <div><label for="q">Search</label><input id="q" name="q" type="search" value="{{ request.args.q }}" placeholder="INC-0001 or title"></div>
     <div><label for="st">Status</label>
       <select id="st" name="status"><option value="">All</option>
         {% for s in STATUSES %}<option {% if request.args.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
@@ -19,6 +19,7 @@
       <select id="fm" name="form"><option value="">All</option>
         {% for f in forms %}<option value="{{ f.key }}" {% if request.args.form == f.key %}selected{% endif %}>{{ f.name }}</option>{% endfor %}</select></div>
     <label class="check"><input type="checkbox" name="overdue" value="1" {% if request.args.overdue %}checked{% endif %}> Overdue only</label>
+    <label class="check"><input type="checkbox" name="sla" value="breached" {% if request.args.sla %}checked{% endif %}> SLA breached</label>
     <button class="btn emph" type="submit">Go</button>
   </form>
 
@@ -37,19 +38,21 @@
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Request</th><th>Form</th><th>Status</th><th>Priority</th><th>Assignee</th><th>Due Date</th></tr></thead>
+        <thead><tr><th>Request</th><th>Form</th><th>Status</th><th>Priority</th><th>Assignee</th><th>SLA</th><th>Due Date</th></tr></thead>
         <tbody>
           {% for t in rows %}
           <tr>
             <td><a href="{{ url_for('ticket_detail', tid=t.id) }}">{{ t.number }}</a><span class="sub">{{ t.title }}</span></td>
             <td>{{ t.form_version.form.name }}<span class="sub">v{{ t.form_version.version }}</span></td>
-            <td>{{ status(t.status) }}</td>
+            <td>{{ status(t.status, t.status_label) }}</td>
             <td>{{ priority(t.priority) }}{% if not t.priority and t.open_priority_requests %}<span class="sub">Requested</span>{% endif %}</td>
-            <td>{{ t.assignee.name if t.assignee else 'Unassigned' }}</td>
+            <td>{{ t.assignee.name if t.assignee else 'Unassigned' }}{% if t.group %}<span class="sub">{{ t.group.name }}</span>{% endif %}</td>
+            {% set c = clocks[t.id] %}{% set k = c.respond if c.respond and not c.respond.done else c.resolve %}
+            <td>{{ sla(k) if k else '—' }}{% if k and k.kind == 'respond' and not k.done %}<span class="sub">to respond</span>{% endif %}</td>
             <td>{{ t.due_date|d }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="6" class="empty">No requests found.</td></tr>
+          <tr><td colspan="7" class="empty">No requests found.</td></tr>
           {% endfor %}
         </tbody>
       </table>
