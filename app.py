@@ -31,13 +31,14 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 import core
 from core import (MANUAL_STATUSES, MIN_PASSWORD, PRIORITY_CLASS, STATUS_CLASS, Invalid, as_form_data, asked_for_priority,
-                  can_edit_values, can_set_priority, can_submit, can_view, change, need, notify, participants, record, subscribers,
-                  set_status,
+                  can_edit_values, can_set_priority, can_submit, can_view, change, mark_responded, need, notify, participants,
+                  record, subscribers, set_status,
                   show_value, store_upload, validate)
 from models import (FIELD_TYPES, LINK_KINDS, PERMISSIONS, PRIORITIES, STATUSES, Attachment, Comment, Form, FormVersion,
-                    OtpChallenge, PermissionProfile, PriorityRequest, Section, SupportGroup, Ticket, TicketApproval,
-                    TicketLink, User, db, utcnow)
-from workflow import current_stage, decide, pending_for, send_link, start_approval, token_hash
+                    OtpChallenge, PermissionProfile, PriorityRequest, Section, SlaRule, SupportGroup, Ticket,
+                    TicketApproval, TicketLink, User, db, utcnow)
+import sla
+from workflow import condition_met, current_stage, decide, pending_for, send_link, start_approval, token_hash
 
 OTP_TTL = timedelta(minutes=5)
 OTP_RESEND_AFTER = timedelta(seconds=60)
@@ -71,6 +72,11 @@ app.config.update(
     MAIL_FROM=os.environ.get("CMI_MAIL_FROM", "cmi@localhost"),
     SHOW_OTP=os.environ.get("CMI_SHOW_OTP") == "1",  # testing only: sign-in codes are shown on the login page
     BASE_URL=os.environ.get("CMI_BASE_URL", "http://localhost:5001"),  # for links in mail sent outside a request (CLI)
+    # SLA office hours (local time), working days, holidays (YYYY-MM-DD, comma separated) and local offset from UTC
+    OFFICE_HOURS=os.environ.get("CMI_OFFICE_HOURS", "09:30-18:30"),
+    OFFICE_DAYS=os.environ.get("CMI_OFFICE_DAYS", "Mon,Tue,Wed,Thu,Fri,Sat"),
+    HOLIDAYS=os.environ.get("CMI_HOLIDAYS", ""),
+    UTC_OFFSET_MINUTES=int(os.environ.get("CMI_UTC_OFFSET_MINUTES", 330)),  # India Standard Time
 )
 if not app.config["SECRET_KEY"]:
     # No key in .env: generate one once and keep it, so restarts and every running copy accept the same sessions.
@@ -140,6 +146,12 @@ def error_page(e):
 @app.template_filter("dt")
 def fmt_dt(value):
     return value.strftime("%d %b %Y, %H:%M UTC") if value else "—"
+
+
+@app.template_filter("localdt")
+def fmt_local(value):
+    """UTC -> office local time (CMI_UTC_OFFSET_MINUTES), for SLA due times."""
+    return (value + timedelta(minutes=app.config["UTC_OFFSET_MINUTES"])).strftime("%d %b, %H:%M") if value else "—"
 
 
 @app.template_filter("d")
@@ -286,6 +298,23 @@ def link(t, anchor=None):
     return url_for("ticket_detail", tid=t.id, _external=True, _anchor=anchor)
 
 
+def sla_clocks(tickets):
+    """{ticket id: {"respond": Clock, "resolve": Clock}}; tickets without an SLA rule get {}."""
+    rules, cal = SlaRule.query.all(), sla.calendar()  # ponytail: per-ticket history scan; batch-load history past ~5k open tickets
+    return {t.id: sla.clocks(t, rules, cal) for t in tickets}
+
+
+def breached(clocks):
+    return any(c.state == "breached" for c in clocks.values())
+
+
+@app.template_filter("mins")
+def fmt_minutes(m):
+    """Working minutes as '2 h 05 min' or '45 min'."""
+    m = int(abs(m))
+    return f"{m // 60} h {m % 60:02d} min" if m >= 60 else f"{m} min"
+
+
 TICKET_NUMBER = re.compile(r"^(?:[A-Z]{1,5}-)?(\d+)$")  # REQ-0012, INC-7, CHG-0003 or just 12
 
 
@@ -355,7 +384,9 @@ def csv_cell(v):
 @app.get("/home")  # registered first, so url_for("home") builds /home: the site's nginx redirects a bare "/" to /login
 def home():
     groups = tiles(g.user)
-    return render_template("home.html", counts=counts(g.user), tiles=groups,
+    breaches = (sum(1 for c in sla_clocks(Ticket.live().filter(OPEN)).values() if breached(c))
+                if g.user.can("ticket.view") else None)
+    return render_template("home.html", counts=counts(g.user), tiles=groups, breaches=breaches,
                            open_counts={s.id if s else None: section_open(g.user, s) for s, _ in groups})
 
 
@@ -402,6 +433,9 @@ def tickets():
     if args.get("overdue"):
         q = q.filter(Ticket.due_date < date.today(), Ticket.status.notin_(["Closed", "Rejected"]))
     rows = q.order_by(Ticket.id.desc()).limit(5000 if args.get("export") else 500).all()  # ponytail: add paging past 500
+    clocks = sla_clocks(rows)
+    if args.get("sla") == "breached":
+        rows = [t for t in rows if breached(clocks[t.id])]
     if args.get("export") == "csv":
         out = io.StringIO()
         w = csv.writer(out)
@@ -414,7 +448,7 @@ def tickets():
         return Response(out.getvalue(), mimetype="text/csv",
                         headers={"Content-Disposition": f"attachment; filename=cmi-{tab}-{date.today()}.csv"})
     tabs = {k: v for k, v in TABS.items() if k not in hidden}
-    return render_template("tickets.html", rows=rows, tab=tab, tabs=tabs, counts=counts(u),
+    return render_template("tickets.html", rows=rows, tab=tab, tabs=tabs, counts=counts(u), clocks=clocks,
                            forms=[f for f in Form.live().order_by(Form.name) if f.visible_to(u)])
 
 
@@ -450,6 +484,11 @@ def ticket_new():
             if hod:
                 g.user.hod_email = hod  # remembered: the next request pre-fills it
             record(t, "created the request")
+            auto = next((r["priority"] for r in form.priority_rules
+                         if all(condition_met(values, c) for c in r["when"])), None)
+            if auto:
+                t.priority = auto
+                record(t, "updated", "priority", None, auto, note="Set from the answers on the form")
             if t.assignee:
                 record(t, "updated", "assignee", None, t.assignee.name, note="Default assignee for this form")
             if t.group:
@@ -480,6 +519,8 @@ def ticket_new():
     elif source:  # carry forward matching fields from the earlier ticket
         data = as_form_data(fv.schema, source.values)
         data["title"] = f"{LINK_KINDS[kind][0] if kind else 'Copy of'}: {source.title}"[:200]
+        if kind == "change_for" and any(f["id"] == "incident" for f in fv.schema["fields"]):
+            data["incident"] = source.number  # e.g. Emergency Change's "Related Incident Number"
     else:
         data = MultiDict(request.form)
         for f in fv.schema["fields"]:  # pre-fill the HOD stored for this requester
@@ -557,7 +598,9 @@ def ticket_detail(tid):
         can_set_priority=can_set_priority(g.user, t), can_edit_values=can_edit_values(g.user, t),
         can_submit=can_submit(g.user, t), can_view=lambda other: can_view(g.user, other),
         participants=participants(t), all_users=User.query.filter_by(active=True).order_by(User.name).all(),
-        groups=SupportGroup.query.order_by(SupportGroup.name).all(), current=current_stage(t) if t.status == "Pending Approval" else [])
+        groups=SupportGroup.query.order_by(SupportGroup.name).all(), current=current_stage(t) if t.status == "Pending Approval" else [],
+        clocks=sla_clocks([t])[t.id], raise_forms=[f for s, forms in tiles(g.user) if s and s.raise_from_tickets
+                                                   and s.id != t.section_id for f in forms])
 
 
 @app.post("/tickets/<int:tid>/assign")
@@ -580,6 +623,8 @@ def ticket_assign(tid):
         abort(400)
     regrouped = "group_id" in request.form and change(t, "group", group, lambda gr: gr.name if gr else None)
     reassigned = change(t, "assignee", assignee, lambda u: u.name if u else None)
+    if assignee:
+        mark_responded(t)
     if change(t, "due_date", due) or reassigned or regrouped:
         t.row_version += 1
         db.session.commit()
@@ -606,6 +651,7 @@ def ticket_take(tid):
     if stale(t):
         return back(t)
     change(t, "assignee", g.user, lambda u: u.name if u else None)
+    mark_responded(t)
     t.row_version += 1
     db.session.commit()
     flash(f"{t.number} is assigned to you.", "success")
@@ -674,14 +720,23 @@ def ticket_status(tid):
         return back(t)
     reopened = t.status == "Closed"
     if set_status(t, status):
+        mark_responded(t)
         if reopened:
             record(t, "reopened the request", note=request.form.get("reason", "").strip()[:1000])
         t.row_version += 1
         db.session.commit()
         flash(f"Status changed to {status}.", "success")
-        notify([t.requester, t.assignee, *subscribers(t, "status")], f"{t.number}: {status}",
+        notify([t.requester, t.assignee, *subscribers(t, "status")], f"{t.number}: {t.status_label}",
                f"{g.user.name} {'reopened' if reopened else 'changed'} {t.number} – {t.title}"
-               f"{'' if reopened else ' to ' + status}.\n\n{link(t)}")
+               f"{'' if reopened else ' to ' + t.status_label}.\n\n{link(t)}")
+        if status == "Closed":  # a change raised for an incident is done: tell the incident's team
+            for lk in TicketLink.query.filter_by(from_ticket_id=t.id, kind="change_for"):
+                inc = lk.to_ticket
+                if not inc.deleted_at and inc.status not in ("Closed", "Rejected"):
+                    notify([inc.assignee, *(inc.group.members if inc.group else [])],
+                           f"[{inc.number}] {t.number} is {t.status_label.lower()}",
+                           f"{t.number} – {t.title}, raised for {inc.number} – {inc.title}, is {t.status_label.lower()}. "
+                           f"You can now resolve {inc.number}.\n\n{link(inc)}")
     return back(t)
 
 
@@ -783,6 +838,28 @@ def approval_resend(tid, aid):
     return back(t, "approvals")
 
 
+@app.get("/changes/calendar")
+def change_calendar():
+    """Month view of changes by their Planned Start, so clashes show before they are approved. IT team only."""
+    if not g.user.is_core:
+        abort(403)
+    try:
+        first = date.fromisoformat(request.args.get("month", "") + "-01")
+    except ValueError:
+        first = date.today().replace(day=1)
+    nxt = (first + timedelta(days=32)).replace(day=1)
+    days = {}
+    for t in Ticket.live().filter(Ticket.status != "Rejected").order_by(Ticket.id):  # ponytail: scans all; index planned_start if slow
+        start = str(t.values.get("planned_start") or "")[:10]
+        if first.isoformat() <= start < nxt.isoformat() and can_view(g.user, t):
+            days.setdefault(date.fromisoformat(start), []).append(t)
+    grid_start = first - timedelta(days=first.weekday())
+    weeks = [[grid_start + timedelta(days=7 * w + d) for d in range(7)] for w in range((nxt - grid_start).days // 7 + 1)]
+    weeks = [wk for wk in weeks if wk[0] < nxt]
+    return render_template("calendar.html", first=first, weeks=weeks, days=days,
+                           prev=(first - timedelta(days=1)).strftime("%Y-%m"), nxt=nxt.strftime("%Y-%m"))
+
+
 @app.post("/tickets/<int:tid>/comment")
 def ticket_comment(tid):
     t = get_ticket(tid)
@@ -791,6 +868,7 @@ def ticket_comment(tid):
     if body:
         db.session.add(Comment(ticket_id=t.id, author_id=g.user.id, body=body))
         record(t, "added a comment")
+        mark_responded(t)
         db.session.commit()
         notify([*participants(t), *subscribers(t, "comment")], f"[{t.number}] {t.title}",
                f"{g.user.name} commented on {t.number}:\n\n{body}\n\n"
@@ -980,7 +1058,13 @@ def _sub(options, label="Subcategory"):
 _NEEDED_BY = {"id": "needed_by", "label": "Needed By", "type": "date"}
 _HOD = {"id": "hod_email", "label": "HOD Email (for approval)", "type": "approver_email", "required": True, "material": True}
 _JUSTIFICATION = {"id": "justification", "label": "Business Justification", "type": "textarea", "required": True, "max_length": 2000}
-_INCIDENT = [  # every incident form ends with these; impact + can_work feed the priority the service desk sets
+_IMPACT_PRIORITY = [  # incident forms: priority from "who is affected" x "can work continue"; first match wins
+    {"when": [{"field": "affected", "equals": "Whole site / many users"}, {"field": "can_work", "equals": "No"}], "priority": "Critical"},
+    {"when": [{"field": "affected", "equals": "My team"}, {"field": "can_work", "equals": "No"}], "priority": "High"},
+    {"when": [{"field": "affected", "equals": "Just me"}, {"field": "can_work", "equals": "No"}], "priority": "Medium"},
+    {"when": [{"field": "can_work", "equals": "Yes, with a workaround"}], "priority": "Low"},
+]
+_INCIDENT = [  # every incident form ends with these; impact + can_work set the priority (_IMPACT_PRIORITY)
     {"id": "affected", "label": "Who is affected?", "type": "select", "required": True,
      "options": ["Just me", "My team", "Whole site / many users"]},
     {"id": "can_work", "label": "Can work continue?", "type": "select", "required": True,
@@ -1068,6 +1152,15 @@ SEED_FORM_GROUPS = {  # form key: support group whose queue its new tickets land
     **{k: "Desktop Support" for k in ("SOFTWARE_INSTALL", "HARDWARE_REQUEST", "HARDWARE_ISSUE")},
     "NETWORK_ISSUE": "Network Team",
 }
+SEED_SLA = [  # form key or section name, priority, respond, resolve, 24x7 ("d" = one office day; 24 h when 24x7)
+    ("ACCESS_REQUEST", None, "4h", "1d", False), ("SOFTWARE_INSTALL", None, "4h", "2d", False),
+    ("HARDWARE_REQUEST", None, "4h", "5d", False), ("IT_SERVICE", None, "4h", "2d", False),
+    ("OTHER_REQUEST", None, "1d", "3d", False),
+    ("IT Incidents", "Critical", "15m", "4h", True), ("IT Incidents", "High", "1h", "8h", False),
+    ("IT Incidents", "Medium", "4h", "2d", False), ("IT Incidents", "Low", "1d", "5d", False),
+    ("STANDARD_CHANGE", None, "", "2d", False), ("NORMAL_CHANGE", None, "", "10d", False),
+    ("EMERGENCY_CHANGE", None, "2h", "1d", True),
+]
 SEED_SECTIONS = [  # name, prefix, colour, icon, core users only, closed label, description, form keys
     ("IT Requests", "REQ", "green", "cart", False, "Fulfilled", "Ask for access, software, hardware",
      ["ACCESS_REQUEST", "SOFTWARE_INSTALL", "HARDWARE_REQUEST", "IT_SERVICE", "OTHER_REQUEST"]),
@@ -1127,16 +1220,24 @@ def seed():
                                 default_group=groups[SEED_FORM_GROUPS[key]] if key in SEED_FORM_GROUPS else None,
                                 default_assignee_id=uid["assigner@cmi.local"] if key == "FIREWALL_RULE" else None,
                                 auto_submit=key in SEED_SECTIONS[0][7],  # IT Requests go to the HOD straight away
+                                priority_rules=_IMPACT_PRIORITY if key in SEED_SECTIONS[1][7] else [],
                                 versions=[FormVersion(version=1, schema=schema)]))
     for pos, (name, prefix, color, icon, core_only, closed, desc, keys) in enumerate(SEED_SECTIONS, 1):
         s = Section.query.filter_by(name=name).first()
         if not s:
             s = Section(name=name, prefix=prefix, color=color, icon=icon, position=pos, core_only=core_only,
-                        closed_label=closed, description=desc)
+                        closed_label=closed, description=desc, raise_from_tickets=prefix == "CHG")  # "Raise Change"
             db.session.add(s)
         for f in Form.query.filter(Form.key.in_(keys), Form.section_id.is_(None)):  # never moves a form the admin placed
             f.section, f.position = s, keys.index(f.key) + 1
     db.session.flush()
+    if not SlaRule.query.first():  # targets from the proposal; edit under Administration > SLA Rules
+        cal, sections = sla.calendar(), {s.name: s for s in Section.query}
+        forms = {f.key: f for f in Form.query}
+        for where, priority, respond, resolve, rtc in SEED_SLA:
+            db.session.add(SlaRule(section=sections.get(where), form=forms.get(where), priority=priority, round_the_clock=rtc,
+                                   respond_minutes=sla.parse_duration(respond, cal, rtc),
+                                   resolve_minutes=sla.parse_duration(resolve, cal, rtc)))
     # Tickets raised before sections existed join their form's section when that keeps their CHG- number.
     for t in Ticket.query.filter(Ticket.section_id.is_(None)):
         if t.form_version.form.section and t.form_version.form.section.prefix == "CHG":
@@ -1145,6 +1246,34 @@ def seed():
     print("Seeded profiles, support groups, sections, forms and workflows.")
     if created:
         print(f"Core users {', '.join(created)} created with password: {password}")
+
+
+@app.cli.command("sla-check")
+def sla_check():
+    """Email SLA warnings (75% of the time used) and breaches (100%), once each. Run every 15 minutes."""
+    escalate = [u for u in User.query.filter_by(active=True) if u.can("sla.escalate")]
+    sent = 0
+    with app.test_request_context(base_url=app.config["BASE_URL"]):
+        tickets_ = Ticket.live().filter(OPEN).all()
+        for t in tickets_:
+            for kind, c in sla_clocks([t])[t.id].items():
+                key = f"{kind}-{'breach' if c.state == 'breached' else 'warn'}"
+                if c.done or c.state not in ("warning", "breached") or key in t.sla_alerts:
+                    continue
+                team = [t.assignee] if t.assignee else (t.group.members if t.group else [])
+                verb = "has breached" if c.state == "breached" else "is close to breaching"
+                for u in {u.id: u for u in [*team, *(escalate if c.state == "breached" else [])] if u and u.active}.values():
+                    try:
+                        core.send_mail(u.email, f"[{t.number}] SLA {kind} {verb.split()[-1]}: {t.title}",
+                                       f"{t.number} – {t.title} {verb} its {kind} target "
+                                       f"({sla.format_duration(c.target)}). Group: {t.group.name if t.group else '—'}, "
+                                       f"assignee: {t.assignee.name if t.assignee else 'nobody'}.\n\n{link(t)}")
+                    except Exception:
+                        log.exception("SLA mail to %s failed", u.email)
+                t.sla_alerts = [*t.sla_alerts, key]
+                sent += 1
+        db.session.commit()
+    print(f"Sent {sent} SLA alert(s).")
 
 
 @app.cli.command("remind-approvers")

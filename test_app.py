@@ -586,6 +586,133 @@ def test_admin_creates_support_group(mail):
     assert "Neha Lead" in admin.get("/admin/groups").get_data(as_text=True)
 
 
+# ---------------------------------------------------------------- SLA
+
+def test_office_hours_maths():
+    from datetime import date, datetime, time, timedelta
+    import sla
+    cal = sla.Calendar(time(9, 30), time(18, 30), {0, 1, 2, 3, 4, 5}, set(), timedelta(minutes=330))  # Mon-Sat, IST
+    mon = date(2026, 11, 2)
+    assert mon.weekday() == 0
+    utc = lambda d, h, m=0: datetime.combine(d, time(h, m))
+    assert sla.working_minutes(utc(mon, 4), utc(mon, 5), cal) == 60  # 09:30-10:30 IST
+    sat = mon + timedelta(days=5)
+    assert sla.working_minutes(utc(sat, 12), utc(mon + timedelta(days=7), 5), cal) == 120  # Sat 17:30-18:30 + Mon 9:30-10:30
+    assert sla.add_working(utc(sat, 12), 120, cal) == utc(mon + timedelta(days=7), 5)  # Sunday skipped
+    cal.holidays.add(mon + timedelta(days=7))
+    assert sla.working_minutes(utc(sat, 12), utc(mon + timedelta(days=7), 5), cal) == 60  # holiday Monday
+    assert sla.working_minutes(utc(mon, 4), utc(mon, 5), cal, round_the_clock=True) == 60
+    assert (sla.parse_duration("2d", cal), sla.parse_duration("30m", cal), sla.parse_duration("1d", cal, True)) == (1080, 30, 1440)
+    with pytest.raises(ValueError):
+        sla.parse_duration("soon", cal)
+
+
+def test_clock_pauses_while_waiting():
+    from datetime import datetime, timedelta
+    from types import SimpleNamespace as NS
+    import sla
+    t0 = datetime(2026, 11, 2, 4, 0)
+    at = lambda m: t0 + timedelta(minutes=m)
+    t = NS(created_at=t0, history=[NS(field="status", at=at(10), new="Pending Approval"),
+                                   NS(field="status", at=at(70), new="In Progress"), NS(field="status", at=at(100), new="Closed")])
+    assert sla.running_intervals(t, at(200)) == [(t0, at(10)), (at(70), at(100))]
+
+
+def test_incident_priority_from_answers_and_sla_shown(mail):
+    req = requester(mail)
+    tid = create(req, form="IT_ISSUE", **{**INCIDENT, "affected": "Whole site / many users"})
+    with cmi.app.app_context():
+        assert ticket(tid).priority == "Critical"  # whole site + cannot work
+    eng = login("engineer@cmi.local")
+    page = eng.get(f"/tickets/{tid}").get_data(as_text=True)
+    assert "SLA · Respond" in page and "SLA · Resolve" in page
+    post(eng, f"/tickets/{tid}/take", rv=rv(tid))
+    with cmi.app.app_context():
+        assert ticket(tid).responded_at  # taking it is the response
+    tid2 = create(req, form="IT_ISSUE", **{**INCIDENT, "can_work": "Yes, with a workaround"})
+    with cmi.app.app_context():
+        assert ticket(tid2).priority == "Low"
+
+
+def test_sla_check_warns_then_escalates_once(mail):
+    from datetime import timedelta
+    tid = create(requester(mail), form="IT_ISSUE", **{**INCIDENT, "affected": "Whole site / many users"})  # 15m / 4h, 24x7
+
+    def age(minutes):
+        with cmi.app.app_context():
+            ticket(tid).created_at -= timedelta(minutes=minutes)
+            db.session.commit()
+    run = lambda: cmi.app.test_cli_runner().invoke(args=["sla-check"]).output
+    age(30)  # respond (15 min) breached; resolve at 30 / 240 min: fine
+    del mail[:]
+    assert "Sent 1 SLA alert" in run()
+    to = {m[0] for m in mail}
+    assert {"assigner@cmi.local", "engineer@cmi.local"} <= to  # the Service Desk group: nobody is assigned yet
+    assert "admin@cmi.local" in to  # System Administrator has sla.escalate
+    assert all("respond breached" in m[1] for m in mail)
+    assert "Sent 0" in run()  # each alert goes out once
+    age(180)  # resolve now at 210 / 240 min: warning, not escalated
+    del mail[:]
+    assert "Sent 1 SLA alert" in run()
+    assert mail and all("resolve" in m[1] and "breaching" in m[1] for m in mail) and "admin@cmi.local" not in {m[0] for m in mail}
+
+
+def test_on_hold_pauses_the_clock(mail):
+    tid = create(requester(mail), form="IT_ISSUE", **INCIDENT)
+    eng = login("engineer@cmi.local")
+    post(eng, f"/tickets/{tid}/status", status="On Hold", rv=rv(tid))
+    assert "clock paused while on hold" in eng.get(f"/tickets/{tid}").get_data(as_text=True)
+
+
+def test_raise_change_from_incident(mail):
+    req = requester(mail)
+    iid = create(req, form="NETWORK_ISSUE", **{**INCIDENT, "subcategory": "Wi-Fi", "location": "Tower B"})
+    assert "Raise Change" not in req.get(f"/tickets/{iid}").get_data(as_text=True)  # end users can't raise changes
+    eng = login("engineer@cmi.local")
+    assert "Raise Change" in eng.get(f"/tickets/{iid}").get_data(as_text=True)
+    url = f"/tickets/new?form=EMERGENCY_CHANGE&from={iid}&link=change_for"
+    assert f'value="INC-{iid:04d}"' in eng.get(url).get_data(as_text=True)  # incident number carried over
+    r = post(eng, url, title="Replace Wi-Fi controller", incident=f"INC-{iid:04d}", systems="Network",
+             reason="Controller failing", planned_start="2026-11-20T22:00", rollback_plan="Old controller")
+    cid = int(r.location.rsplit("/", 1)[1])
+    with cmi.app.app_context():
+        lk = TicketLink.query.filter_by(from_ticket_id=cid).one()
+        assert (lk.to_ticket_id, lk.kind) == (iid, "change_for")
+    del mail[:]
+    post(login("admin@cmi.local"), f"/tickets/{cid}/status", status="Closed", rv=rv(cid))
+    assert any(m[0] == "engineer@cmi.local" and "You can now resolve" in m[2] for m in mail)  # the incident's group
+
+
+def test_change_calendar(mail):
+    eng = login("engineer@cmi.local")
+    create(eng, form="NORMAL_CHANGE", title="Core switch firmware", systems="Network", reason="Bug fix", risk="Medium",
+           planned_start="2026-11-20T22:00", planned_end="2026-11-20T23:00", rollback_plan="Previous image",
+           hod_email="hod@corp.com")
+    assert "Core switch firmware" in eng.get("/changes/calendar?month=2026-11").get_data(as_text=True)
+    assert "Core switch firmware" not in eng.get("/changes/calendar?month=2026-12").get_data(as_text=True)
+    assert requester(mail).get("/changes/calendar").status_code == 403
+
+
+def test_admin_edits_sla_rules(mail):
+    admin = login("admin@cmi.local")
+    with cmi.app.app_context():
+        from models import Section, SlaRule
+        sid = Section.query.filter_by(name="IT Incidents").one().id
+        before = SlaRule.query.count()
+    form = lambda respond: MultiDict([("_csrf", "test-token"), ("r_where", f"section:{sid}"), ("r_priority", "High"),
+                                      ("r_respond", respond), ("r_resolve", "1d"), ("r_clock", "office")])
+    with admin.session_transaction() as s:
+        s["_csrf"] = "test-token"
+    assert "write times like" in admin.post("/admin/sla", data=form("soon"), follow_redirects=True).get_data(as_text=True)
+    with cmi.app.app_context():
+        assert SlaRule.query.count() == before  # nothing saved
+    admin.post("/admin/sla", data=form("2h"))
+    with cmi.app.app_context():
+        (r,) = SlaRule.query.all()
+        assert (r.section_id, r.priority, r.respond_minutes, r.resolve_minutes) == (sid, "High", 120, 540)
+    assert 'value="2h"' in admin.get("/admin/sla").get_data(as_text=True)
+
+
 # ---------------------------------------------------------------- export & backup
 
 def test_csv_export_neutralises_formulas(mail):

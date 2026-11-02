@@ -6,7 +6,7 @@ from sqlalchemy.engine import Engine
 
 db = SQLAlchemy()
 
-STATUSES = ["New", "In Progress", "Pending Approval", "Returned", "Approved", "Rejected", "Closed"]
+STATUSES = ["New", "In Progress", "On Hold", "Pending Approval", "Returned", "Approved", "Rejected", "Closed"]
 PRIORITIES = ["Critical", "High", "Medium", "Low"]
 
 # Every permission key the app checks. Profiles are editable lists of these.
@@ -24,6 +24,7 @@ PERMISSIONS = {
     "form.publish": "Build and publish forms, configure workflows",
     "user.manage": "Manage users and permission profiles",
     "report.view": "View reports and export",
+    "sla.escalate": "Receive SLA breach escalations",
 }
 
 # approver_email: the requester types someone's email (e.g. their HOD); a workflow stage can send them an approval link.
@@ -39,6 +40,7 @@ LINK_KINDS = {  # kind: (label from the linking ticket, label from the linked ti
     "related": ("Related to", "Related to"),
     "duplicate_of": ("Duplicate of", "Has duplicate"),
     "follow_up_to": ("Follow-up to", "Has follow-up"),
+    "change_for": ("Change for", "Change raised"),  # a change raised from an incident or request
 }
 
 
@@ -136,6 +138,8 @@ class Section(db.Model):
     position = db.Column(db.Integer, default=0, nullable=False)
     core_only = db.Column(db.Boolean, default=False, nullable=False)  # hidden from end users (non-core)
     closed_label = db.Column(db.String(30), default="", nullable=False)  # shown instead of "Closed", e.g. Fulfilled
+    # Offer this section's forms as "Raise …" on tickets of other sections (Change Management: "Raise Change")
+    raise_from_tickets = db.Column(db.Boolean, default=False, nullable=False, server_default="0")
     forms = db.relationship("Form", back_populates="section")
 
     def visible_to(self, user):
@@ -158,6 +162,8 @@ class Form(db.Model):
     default_assignee_id = db.Column(db.ForeignKey("user.id"))
     default_group_id = db.Column(db.ForeignKey("support_group.id"))
     auto_submit = db.Column(db.Boolean, default=False, nullable=False, server_default="0")  # start approval on create
+    # Priority set on create from the answers: [{"when": [{"field", "equals"}, ...], "priority": "High"}], first match wins
+    priority_rules = db.Column(db.JSON, default=list, nullable=False, server_default="[]")
     deleted_at = db.Column(db.DateTime)  # soft delete: hidden everywhere; restore by clearing it in the DB
     versions = db.relationship("FormVersion", order_by="FormVersion.version", back_populates="form")
     section = db.relationship("Section", back_populates="forms")
@@ -211,6 +217,8 @@ class Ticket(db.Model):
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow, nullable=False)
     closed_at = db.Column(db.DateTime)
+    responded_at = db.Column(db.DateTime)  # first time IT picked it up: assigned, worked on or answered (SLA "respond")
+    sla_alerts = db.Column(db.JSON, default=list, nullable=False, server_default="[]")  # e.g. ["resolve-warn"]: mailed once
     deleted_at = db.Column(db.DateTime)  # soft delete: hidden everywhere; restore by clearing it in the DB
 
     form_version = db.relationship("FormVersion")
@@ -325,6 +333,20 @@ class Comment(db.Model):
     body = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
     author = db.relationship("User")
+
+
+class SlaRule(db.Model):
+    """Respond / resolve targets in minutes. Applies to a form, or to a section; optionally only for one priority.
+    The most specific matching rule wins (see sla.rule_for)."""
+    id = db.Column(db.Integer, primary_key=True)
+    section_id = db.Column(db.ForeignKey("section.id"))
+    form_id = db.Column(db.ForeignKey("form.id"))
+    priority = db.Column(db.String(20))  # None = any priority
+    respond_minutes = db.Column(db.Integer)
+    resolve_minutes = db.Column(db.Integer)
+    round_the_clock = db.Column(db.Boolean, default=False, nullable=False)  # 24x7 instead of office hours
+    section = db.relationship("Section")
+    form = db.relationship("Form")
 
 
 class TicketHistory(db.Model):

@@ -57,3 +57,10 @@
   {% endif %}
 {% endfor %}
 {% endmacro %}
+
+{# SLA clock (sla.Clock) as a coloured badge: time left, paused, met, or how late. #}
+{% macro sla(c) %}{% if c %}<span class="status {{ {'met': 'positive', 'missed': 'negative', 'breached': 'negative', 'warning': 'critical', 'paused': 'neutral', 'running': 'info'}[c.state] }}">
+  {%- if c.state == 'met' %}Met{% elif c.state == 'missed' %}Missed by {{ (c.used - c.target)|mins }}
+  {%- elif c.state == 'breached' %}Overdue {{ (c.used - c.target)|mins }}{% elif c.state == 'paused' %}Paused{{ ' · ' ~ c.left|mins ~ ' left' if c.left <= 600 }}
+  {%- elif c.left > 600 %}Due {{ c.due|localdt }}{# over 10 working hours: a date reads better than "89 h left" #}
+  {%- else %}{{ c.left|mins }} left{% endif %}</span>{% endif %}{% endmacro %}

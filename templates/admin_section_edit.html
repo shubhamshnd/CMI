@@ -19,6 +19,8 @@
       <div class="hint">New tickets are numbered like REQ-0012. Existing tickets keep their number.</div></div>
     <div class="field"><label for="closed_label">“Closed” shows as</label>
       <input id="closed_label" name="closed_label" value="{{ s.closed_label or '' }}" maxlength="30" placeholder="Fulfilled, Resolved, Implemented…"></div>
+    <div class="field"><label class="check"><input type="checkbox" name="raise_from_tickets" {% if s.raise_from_tickets %}checked{% endif %}>
+      Offer this section's forms on other tickets (e.g. “Raise Change” on an incident; core users only)</label></div>
     <div class="field"><label for="color">Colour</label>
       <select id="color" name="color">{% for c in COLORS %}<option {% if c == s.color %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
     <div class="field"><label for="icon">Icon</label>

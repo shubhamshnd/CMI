@@ -11,8 +11,9 @@ from flask import Blueprint, abort, flash, g, redirect, render_template, request
 from werkzeug.security import generate_password_hash
 
 from core import EMAIL, EVENTS, FILE_TYPES, MIN_PASSWORD, need
-from models import (FIELD_TYPES, PERMISSIONS, SECTION_COLORS, SECTION_ICONS, Form, FormVersion, PermissionProfile,
-                    Section, SupportGroup, Ticket, TicketApproval, User, db, utcnow)
+from models import (FIELD_TYPES, PERMISSIONS, PRIORITIES, SECTION_COLORS, SECTION_ICONS, Form, FormVersion, PermissionProfile,
+                    Section, SlaRule, SupportGroup, Ticket, TicketApproval, User, db, utcnow)
+import sla
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -283,21 +284,30 @@ def form_workflow(fid):
         dg = request.form.get("default_group_id", type=int)
         if dg and dg not in {gr.id for gr in groups}:
             errors.append("Choose an existing support group.")
+        pcols = {k: request.form.getlist("p_" + k) for k in ("field1", "value1", "field2", "value2", "priority")}
+        priority_rules = []
+        for i in range(len(pcols["priority"])):
+            v = {k: (pcols[k][i].strip() if i < len(pcols[k]) else "") for k in pcols}
+            when = [{"field": v[f"field{n}"], "equals": v[f"value{n}"]} for n in (1, 2) if v[f"field{n}"]]
+            if not when or any(c["field"] not in schema_fields or not c["equals"] for c in when) or v["priority"] not in PRIORITIES:
+                errors.append(f"Priority rule {i + 1}: choose a field and a value, and a priority.")
+            priority_rules.append({"when": when, "priority": v["priority"]})
         if errors:
             for e in errors:
                 flash(e, "error")
         else:
             form.workflow, form.default_assignee_id, form.default_group_id = stages, da, dg
             form.auto_submit = "auto_submit" in request.form
+            form.priority_rules = priority_rules
             db.session.commit()
             flash("Workflow saved. It applies to requests submitted for approval from now on.", "success")
             return redirect(url_for("admin.form_workflow", fid=form.id))
     else:
-        stages = form.workflow
+        stages, priority_rules = form.workflow, form.priority_rules
     names = {u.id: u.email for u in User.query}
     return render_template("admin_workflow.html", form=form, stages=stages, schema_fields=schema_fields,
                            approvers=approvers, core_users=core_users, names=names, email_fields=email_fields,
-                           groups=groups)
+                           groups=groups, priority_rules=priority_rules)
 
 
 # ---------------------------------------------------------------- sections
@@ -333,7 +343,8 @@ def section_edit(sid=None):
                  icon=request.form.get("icon") if request.form.get("icon") in SECTION_ICONS else "doc",
                  position=request.form.get("position", type=int) or 0,
                  core_only=request.form.get("visible_to") == "core",
-                 closed_label=request.form.get("closed_label", "").strip()[:30])
+                 closed_label=request.form.get("closed_label", "").strip()[:30],
+                 raise_from_tickets="raise_from_tickets" in request.form)
         errors = []
         if not v["name"] or Section.query.filter(Section.name == v["name"], Section.id != (s.id or 0)).first():
             errors.append("Enter a section name that is not already in use.")
@@ -351,6 +362,55 @@ def section_edit(sid=None):
         flash(f"Saved {s.name}.", "success")
         return redirect(url_for("admin.sections"))
     return render_template("admin_section_edit.html", s=s, COLORS=SECTION_COLORS, ICONS=SECTION_ICONS)
+
+
+# ---------------------------------------------------------------- SLA rules
+
+@bp.route("/sla", methods=["GET", "POST"])
+def sla_rules():
+    """Respond / resolve targets. Rows apply to a form or a section, optionally for one priority; the most specific wins."""
+    need("form.publish")
+    cal = sla.calendar()
+    sections = all_sections()
+    forms = [f for f in Form.live().order_by(Form.name) if not f.archived]
+    rules = SlaRule.query.all()
+    if request.method == "POST":
+        cols = {k: request.form.getlist("r_" + k) for k in ("where", "priority", "respond", "resolve", "clock")}
+        new, errors = [], []
+        for i in range(len(cols["where"])):
+            v = {k: (cols[k][i].strip() if i < len(cols[k]) else "") for k in cols}
+            kind, _, ident = v["where"].partition(":")
+            target = (db.session.get(Section, int(ident)) if kind == "section" else db.session.get(Form, int(ident))) \
+                if ident.isdigit() else None
+            rtc = v["clock"] == "24x7"
+            try:
+                respond, resolve = (sla.parse_duration(v[k], cal, rtc) for k in ("respond", "resolve"))
+            except ValueError:
+                errors.append(f"Rule {i + 1}: write times like 30m, 4h or 2d.")
+                continue
+            if not target or not (respond or resolve) or v["priority"] not in ("", *PRIORITIES):
+                errors.append(f"Rule {i + 1}: choose a section or form and give at least one target.")
+                continue
+            new.append(SlaRule(section=target if kind == "section" else None, form=target if kind == "form" else None,
+                               priority=v["priority"] or None, respond_minutes=respond, resolve_minutes=resolve,
+                               round_the_clock=rtc))
+        if errors:
+            for e in errors:
+                flash(e, "error")
+        else:
+            for r in rules:
+                db.session.delete(r)
+            db.session.add_all(new)
+            db.session.commit()
+            flash("SLA rules saved. Open tickets are measured against them straight away.", "success")
+            return redirect(url_for("admin.sla_rules"))
+    rows = [dict(where=f"section:{r.section_id}" if r.section_id else f"form:{r.form_id}", priority=r.priority or "",
+                 respond=sla.format_duration(r.respond_minutes, cal, r.round_the_clock),
+                 resolve=sla.format_duration(r.resolve_minutes, cal, r.round_the_clock),
+                 clock="24x7" if r.round_the_clock else "office")
+            for r in sorted(rules, key=lambda r: (r.section_id is not None, r.form.name if r.form else "",
+                                                  PRIORITIES.index(r.priority) if r.priority else -1))]
+    return render_template("admin_sla.html", rows=rows, sections=sections, forms=forms, cal=cal)
 
 
 # ---------------------------------------------------------------- users & profiles
@@ -530,12 +590,17 @@ def reports():
     today = date.today()
     open_ = [t for t in tickets if t.status not in ("Closed", "Rejected")]
     closed = [t for t in tickets if t.closed_at]
+    rules, cal = SlaRule.query.all(), sla.calendar()
+    clocks = {t.id: sla.clocks(t, rules, cal) for t in [*open_, *closed]}
+    recent = [t for t in closed if t.closed_at >= utcnow() - timedelta(days=30)]
     kpis = [
         ("Open", len(open_), url_for("tickets", tab="all")),
         ("Overdue", sum(1 for t in open_ if t.due_date and t.due_date < today), url_for("tickets", tab="all", overdue=1)),
         ("Pending approval", sum(1 for t in open_ if t.status == "Pending Approval"), url_for("tickets", tab="all", status="Pending Approval")),
         ("Unassigned", sum(1 for t in open_ if not t.assignee_id), None),
-        ("Closed, last 30 days", sum(1 for t in closed if t.closed_at >= utcnow() - timedelta(days=30)), None),
+        ("Closed, last 30 days", len(recent), None),
+        ("SLA breached (open)", sum(1 for t in open_ if any(c.state == "breached" for c in clocks[t.id].values())),
+         url_for("tickets", tab="all", open=1, sla="breached")),
     ]
     rounds = defaultdict(list)
     for a in TicketApproval.query.join(Ticket).filter(Ticket.deleted_at.is_(None)):
@@ -554,5 +619,8 @@ def reports():
         "Open by support group": Counter(t.group.name if t.group else "No group" for t in open_),
         "Open by assignee": Counter(t.assignee.name if t.assignee else "Unassigned" for t in open_),
         "All by status": Counter(t.status for t in tickets),
+        **{f"{kind.title()} SLA, closed in the last 30 days": Counter(
+            f"{t.section.name if t.section else 'No section'}: {clocks[t.id][kind].state}"
+            for t in recent if kind in clocks[t.id]) for kind in ("respond", "resolve")},
     }
     return render_template("reports.html", kpis=kpis, times=times, groups=groups)

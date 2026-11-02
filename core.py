@@ -15,11 +15,11 @@ from models import Attachment, PermissionProfile, TicketHistory, User, db, utcno
 
 log = logging.getLogger("cmi")
 
-STATUS_CLASS = {"New": "info", "In Progress": "info", "Pending Approval": "critical", "Returned": "critical",
+STATUS_CLASS = {"New": "info", "In Progress": "info", "On Hold": "critical", "Pending Approval": "critical", "Returned": "critical",
                 "Approved": "positive", "Rejected": "negative", "Closed": "neutral"}
 PRIORITY_CLASS = {"Critical": "negative", "High": "negative", "Medium": "critical", "Low": "neutral"}
 # Statuses a user may pick by hand; the approval engine owns Pending Approval / Returned / Approved / Rejected.
-MANUAL_STATUSES = ["New", "In Progress", "Closed"]
+MANUAL_STATUSES = ["New", "In Progress", "On Hold", "Closed"]
 
 MIN_PASSWORD = 10
 MB = 1024 * 1024
@@ -148,6 +148,12 @@ def change(t, field, new, show=lambda v: v):
     record(t, "updated", field.replace("_", " "), show(old), show(new))
     setattr(t, field, new)
     return True
+
+
+def mark_responded(t):
+    """SLA "respond": the first time someone in IT other than the requester picks the ticket up or answers it."""
+    if not t.responded_at and g.user.is_core and g.user.id != t.requester_id:
+        t.responded_at = utcnow()
 
 
 def set_status(t, status):

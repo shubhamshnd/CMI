@@ -18,7 +18,7 @@
     {{ kpi(counts.assigned, 'Assigned to me', url_for('tickets', tab='assigned', open=1)) }}
     {% if counts.group is not none %}{{ kpi(counts.group, "In my groups' queue", url_for('tickets', tab='group')) }}{% endif %}
     {{ kpi(counts.approvals, 'Waiting for my approval', url_for('tickets', tab='approvals')) }}
-    {% if counts.overdue is not none %}{{ kpi(counts.overdue, 'Overdue', url_for('tickets', tab='all', overdue=1), alert=True) }}{% endif %}
+    {% if breaches is not none %}{{ kpi(breaches, 'SLA breached', url_for('tickets', tab='all', open=1, sla='breached'), alert=True) }}{% endif %}
     {% endif %}
     {{ kpi(counts.mine_open, 'My open tickets', url_for('tickets', tab='mine', open=1)) }}
     {{ kpi(counts.mine_pending, 'My tickets awaiting approval', url_for('tickets', tab='mine', status='Pending Approval')) }}
@@ -36,7 +36,8 @@
         {% for f in forms %}<li><a href="{{ url_for('ticket_new', form=f.key) }}" title="{{ f.description }}">{{ f.name }}<span aria-hidden="true">›</span></a></li>{% endfor %}
       </ul>
       <footer><a href="{{ url_for('tickets', tab='all' if g.user.can('ticket.view') else 'mine', open=1, section=s.id if s else 'none') }}">
-        {{ 'Open' if g.user.can('ticket.view') else 'My open' }}: <b>{{ open_counts[s.id if s else None] }}</b></a></footer>
+        {{ 'Open' if g.user.can('ticket.view') else 'My open' }}: <b>{{ open_counts[s.id if s else None] }}</b></a>
+        {% if s and s.raise_from_tickets and g.user.is_core %} · <a href="{{ url_for('change_calendar') }}">Calendar</a>{% endif %}</footer>
     </section>
     {% else %}
     <p class="muted">No forms are published yet.</p>
@@ -50,6 +51,7 @@
       {% if g.user.is_core %}
       <li><a href="{{ url_for('tickets', tab='assigned') }}">Assigned to Me</a><span class="count">({{ counts.assigned }})</span></li>
       {% if counts.group is not none %}<li><a href="{{ url_for('tickets', tab='group') }}">My Groups' Queue</a><span class="count">({{ counts.group }})</span></li>{% endif %}
+      <li><a href="{{ url_for('change_calendar') }}">Change Calendar</a></li>
       <li><a href="{{ url_for('tickets', tab='priority') }}">Priority Requests</a><span class="count">({{ counts.priority }})</span></li>
       {% endif %}
       <li><a href="{{ url_for('tickets', tab='approvals') }}">Pending My Approval</a><span class="count">({{ counts.approvals }})</span></li>

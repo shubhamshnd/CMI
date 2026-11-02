@@ -285,3 +285,22 @@ td.center input[type=checkbox] { width: auto; height: auto; }
   .group h2 { font-size: 26px; }
   .shell-title { font-size: 15px; }
 }
+
+/* SLA progress bar on the ticket page */
+.sla-bar { display: block; width: 160px; height: 6px; margin-top: 4px; border-radius: 3px; background: #e5e8eb; overflow: hidden; }
+.sla-bar i { display: block; height: 100%; background: var(--info); }
+.sla-bar.warning i { background: var(--critical); }
+.sla-bar.breached i, .sla-bar.missed i { background: var(--negative); }
+.sla-bar.met i { background: var(--positive); }
+.sla-bar.paused i { background: var(--neutral); }
+
+/* Change calendar */
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-left: 1px solid var(--border); border-top: 1px solid var(--border); }
+.cal > div { min-height: 96px; padding: 6px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--surface); font-size: 13px; }
+.cal > .head { min-height: 0; color: var(--muted); background: transparent; }
+.cal > .out { background: #f6f7f8; color: var(--muted); }
+.cal a { display: block; margin-top: 4px; padding: 2px 6px; border-left: 3px solid var(--critical); background: #fff4e3; color: var(--text);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cal a.pending { border-left-color: var(--neutral); background: #f2f3f4; }
+.cal a.emergency { border-left-color: var(--negative); background: #fdecec; }
+.obj-title .actions select { width: auto; }

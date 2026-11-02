@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Change Calendar{% endblock %}
+{% block shell %}Change Calendar{% endblock %}
+{% block body %}
+<main class="page">
+  <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> / Change Calendar</div>
+  <div class="table-toolbar">
+    <h1 class="title">{{ first.strftime('%B %Y') }}</h1>
+    <div class="actions">
+      <a class="btn transparent" href="{{ url_for('change_calendar', month=prev) }}">‹ Previous</a>
+      <a class="btn transparent" href="{{ url_for('change_calendar') }}">This month</a>
+      <a class="btn transparent" href="{{ url_for('change_calendar', month=nxt) }}">Next ›</a>
+    </div>
+  </div>
+  <p class="subtitle">Changes on their Planned Start date. Grey: not approved yet. Red: emergency. Two changes to the same system on one day are worth a second look before approving.</p>
+  <div class="cal">
+    {% for name in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}<div class="head">{{ name }}</div>{% endfor %}
+    {% for week in weeks %}{% for day in week %}
+    <div {% if day.month != first.month %}class="out"{% endif %}>{{ day.day }}
+      {% for t in days.get(day, []) %}
+      <a href="{{ url_for('ticket_detail', tid=t.id) }}" title="{{ t.number }} · {{ t.title }} · {{ t.status_label }}"
+         class="{{ 'emergency' if 'EMERGENCY' in t.form_version.form.key else 'pending' if t.status in ('New', 'Pending Approval', 'Returned') else '' }}">
+        {{ t.values.planned_start[11:16] }} {{ t.title }}</a>
+      {% endfor %}
+    </div>
+    {% endfor %}{% endfor %}
+  </div>
+</main>
+{% endblock %}
