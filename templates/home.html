@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import icon %}
 {% block title %}Home{% endblock %}
 {% block shell %}CMI Home{% endblock %}
 {% macro group(title, text) %}
@@ -7,27 +8,58 @@
   <div><h2>{{ title }}</h2><p>{{ text }}</p><div class="ql">Quick Links</div><ul>{{ caller() }}</ul></div>
 </section>
 {% endmacro %}
+{% macro kpi(value, label, href, alert=False) %}
+<a class="panel home-kpi" href="{{ href }}"><b {% if alert and value %}class="alert"{% endif %}>{{ value }}</b> {{ label }}</a>
+{% endmacro %}
 {% block body %}
 <main class="page">
-  <div class="launchpad">
-    {% if g.user.can('ticket.create') %}
-    {% call group('Change Request Creation', 'Create change requests from published forms') %}
-      <li><a href="{{ url_for('ticket_new') }}">Form Catalogue</a></li>
-      {% for f in forms %}<li><a href="{{ url_for('ticket_new', form=f.key) }}">{{ f.name }}</a></li>{% endfor %}
-    {% endcall %}
+  <div class="home-kpis">
+    {% if g.user.is_core %}
+    {{ kpi(counts.assigned, 'Assigned to me', url_for('tickets', tab='assigned', open=1)) }}
+    {{ kpi(counts.approvals, 'Waiting for my approval', url_for('tickets', tab='approvals')) }}
+    {% if counts.overdue is not none %}{{ kpi(counts.overdue, 'Overdue', url_for('tickets', tab='all', overdue=1), alert=True) }}{% endif %}
     {% endif %}
+    {{ kpi(counts.mine_open, 'My open tickets', url_for('tickets', tab='mine', open=1)) }}
+    {{ kpi(counts.mine_pending, 'My tickets awaiting approval', url_for('tickets', tab='mine', status='Pending Approval')) }}
+  </div>
 
+  {% if g.user.can('ticket.create') %}
+  <div class="desks">
+    {% for s, forms in tiles %}
+    <section class="desk desk-{{ s.color if s else 'grey' }}">
+      <header>
+        {{ icon(s.icon if s else 'doc') }}
+        <div><h2>{{ s.name if s else 'Other Requests' }}</h2><p>{{ s.description if s else 'Forms not placed in a section' }}</p></div>
+      </header>
+      <ul>
+        {% for f in forms %}<li><a href="{{ url_for('ticket_new', form=f.key) }}" title="{{ f.description }}">{{ f.name }}<span aria-hidden="true">›</span></a></li>{% endfor %}
+      </ul>
+      <footer><a href="{{ url_for('tickets', tab='all' if g.user.can('ticket.view') else 'mine', open=1, section=s.id if s else 'none') }}">
+        {{ 'Open' if g.user.can('ticket.view') else 'My open' }}: <b>{{ open_counts[s.id if s else None] }}</b></a></footer>
+    </section>
+    {% else %}
+    <p class="muted">No forms are published yet.</p>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="launchpad">
     {% call group('My Work', 'Your requests, assignments, priority requests and approvals') %}
       <li><a href="{{ url_for('tickets', tab='mine') }}">My Tickets</a><span class="count">({{ counts.mine }})</span></li>
+      {% if g.user.is_core %}
       <li><a href="{{ url_for('tickets', tab='assigned') }}">Assigned to Me</a><span class="count">({{ counts.assigned }})</span></li>
       <li><a href="{{ url_for('tickets', tab='priority') }}">Priority Requests</a><span class="count">({{ counts.priority }})</span></li>
+      {% endif %}
       <li><a href="{{ url_for('tickets', tab='approvals') }}">Pending My Approval</a><span class="count">({{ counts.approvals }})</span></li>
       {% if counts.all is not none %}<li><a href="{{ url_for('tickets', tab='all') }}">All Tickets</a><span class="count">({{ counts.all }})</span></li>{% endif %}
     {% endcall %}
 
     {% if g.user.can('form.publish') or g.user.can('user.manage') %}
-    {% call group('Administration', 'Configure forms, workflows, users and permission profiles') %}
-      {% if g.user.can('form.publish') %}<li><a href="{{ url_for('admin.forms') }}">Forms &amp; Workflows</a></li>{% endif %}
+    {% call group('Administration', 'Configure sections, forms, workflows, users and permission profiles') %}
+      {% if g.user.can('form.publish') %}
+      <li><a href="{{ url_for('admin.sections') }}">Sections</a></li>
+      <li><a href="{{ url_for('admin.forms') }}">Forms &amp; Workflows</a></li>
+      {% endif %}
       {% if g.user.can('user.manage') %}
       <li><a href="{{ url_for('admin.users') }}">Users</a></li>
       <li><a href="{{ url_for('admin.profiles') }}">Permission Profiles</a></li>

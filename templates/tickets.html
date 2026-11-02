@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% from "_macros.html" import status, priority %}
-{% block title %}Change Requests{% endblock %}
-{% block shell %}Change Requests{% endblock %}
+{% block title %}Tickets{% endblock %}
+{% block shell %}Tickets{% endblock %}
 {% block body %}
 <main class="page">
-  <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> / Change Requests</div>
+  <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> / Tickets</div>
 
   <form class="panel filterbar" method="get">
     <input type="hidden" name="tab" value="{{ tab }}">
-    <div><label for="q">Search</label><input id="q" name="q" type="search" value="{{ request.args.q }}" placeholder="CHG-0001 or title"></div>
+    <div><label for="q">Search</label><input id="q" name="q" type="search" value="{{ request.args.q }}" placeholder="INC-0001 or title"></div>
     <div><label for="st">Status</label>
       <select id="st" name="status"><option value="">All</option>
         {% for s in STATUSES %}<option {% if request.args.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
@@ -43,7 +43,7 @@
           <tr>
             <td><a href="{{ url_for('ticket_detail', tid=t.id) }}">{{ t.number }}</a><span class="sub">{{ t.title }}</span></td>
             <td>{{ t.form_version.form.name }}<span class="sub">v{{ t.form_version.version }}</span></td>
-            <td>{{ status(t.status) }}</td>
+            <td>{{ status(t.status, t.status_label) }}</td>
             <td>{{ priority(t.priority) }}{% if not t.priority and t.open_priority_requests %}<span class="sub">Requested</span>{% endif %}</td>
             <td>{{ t.assignee.name if t.assignee else 'Unassigned' }}</td>
             <td>{{ t.due_date|d }}</td>

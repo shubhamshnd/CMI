@@ -7,7 +7,7 @@ Flask + SQLite portal for submitting, assigning, approving and tracking change r
 ```
 pip install -r requirements.txt
 flask --app app db upgrade        # create the database (python app.py also does this)
-flask --app app seed              # permission profiles, demo forms/workflows, demo core users
+flask --app app seed              # permission profiles, sections + their forms/workflows, demo core users
 flask --app app run --debug       # development
 python app.py                     # production: applies migrations, then serves on CMI_HOST:CMI_PORT (default 8080)
 ```
@@ -41,3 +41,5 @@ Test a restore regularly on a spare machine.
 ## Who can do what
 
 Permissions come from editable profiles (Administration → Permission Profiles), not fixed roles. Seeded profiles: Requester, Viewer, Assigner, Assignee, Approver, Form Administrator, System Administrator.
+
+The home page shows one tile per section (Administration → Sections): IT Requests, IT Incidents and Change Management are seeded. A section marked "core users only" (Change Management) is hidden from end users, who sign in with an email code, and they cannot raise its forms. Each section sets its ticket prefix (REQ-0012) and what "Closed" is shown as (Fulfilled, Resolved, Implemented).

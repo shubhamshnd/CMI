@@ -29,6 +29,10 @@ PERMISSIONS = {
 FIELD_TYPES = ["text", "textarea", "select", "multi_select", "date", "datetime", "number", "checkbox",
                "file", "image", "section"]
 
+# Home page section tiles: colour themes and icons the admin can pick from (styled in fiori.css / _macros.icon).
+SECTION_COLORS = ["green", "red", "amber", "blue", "purple", "grey"]
+SECTION_ICONS = ["cart", "alert", "cycle", "doc", "gear", "users"]
+
 LINK_KINDS = {  # kind: (label from the linking ticket, label from the linked ticket)
     "child_of": ("Child of", "Parent of"),
     "related": ("Related to", "Related to"),
@@ -104,11 +108,30 @@ ticket_watcher = db.Table(
 )
 
 
+class Section(db.Model):
+    """A big tile on the home page (IT Requests, IT Incidents, Change Management) grouping forms."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    description = db.Column(db.String(255), default="", nullable=False)
+    prefix = db.Column(db.String(5), nullable=False)  # ticket numbers: REQ-0012
+    color = db.Column(db.String(20), default="blue", nullable=False)  # see SECTION_COLORS
+    icon = db.Column(db.String(20), default="doc", nullable=False)  # see SECTION_ICONS
+    position = db.Column(db.Integer, default=0, nullable=False)
+    core_only = db.Column(db.Boolean, default=False, nullable=False)  # hidden from end users (non-core)
+    closed_label = db.Column(db.String(30), default="", nullable=False)  # shown instead of "Closed", e.g. Fulfilled
+    forms = db.relationship("Form", back_populates="section")
+
+    def visible_to(self, user):
+        return user.is_core or not self.core_only
+
+
 class Form(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     key = db.Column(db.String(60), unique=True, nullable=False)
     name = db.Column(db.String(120), nullable=False)
     description = db.Column(db.String(255), default="", nullable=False)
+    section_id = db.Column(db.ForeignKey("section.id"))  # None = listed under "Other" for everyone
+    position = db.Column(db.Integer, default=0, nullable=False, server_default="0")  # order within its section tile
     draft = db.Column(db.JSON, default=lambda: {"fields": []}, nullable=False)  # edited freely, published as a version
     archived = db.Column(db.Boolean, default=False, nullable=False)
     # Approval stages: [{"name", "mode": "any"|"all", "approvers": [user ids], "condition": {"field", "equals"} | None}]
@@ -118,11 +141,15 @@ class Form(db.Model):
     default_assignee_id = db.Column(db.ForeignKey("user.id"))
     deleted_at = db.Column(db.DateTime)  # soft delete: hidden everywhere; restore by clearing it in the DB
     versions = db.relationship("FormVersion", order_by="FormVersion.version", back_populates="form")
+    section = db.relationship("Section", back_populates="forms")
 
     @classmethod
     def live(cls):
         return cls.query.filter(cls.deleted_at.is_(None))
     default_assignee = db.relationship("User")
+
+    def visible_to(self, user):
+        return not self.section or self.section.visible_to(user)
 
     @property
     def latest(self):
@@ -150,6 +177,7 @@ class Ticket(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
     form_version_id = db.Column(db.ForeignKey("form_version.id"), nullable=False)
+    section_id = db.Column(db.ForeignKey("section.id"))  # the form's section when created: keeps the number stable
     values = db.Column(db.JSON, default=dict, nullable=False)
     status = db.Column(db.String(30), default="New", nullable=False)
     priority = db.Column(db.String(20))  # None = not set yet
@@ -165,6 +193,7 @@ class Ticket(db.Model):
     deleted_at = db.Column(db.DateTime)  # soft delete: hidden everywhere; restore by clearing it in the DB
 
     form_version = db.relationship("FormVersion")
+    section = db.relationship("Section")
     requester = db.relationship("User", foreign_keys=[requester_id])
     assignee = db.relationship("User", foreign_keys=[assignee_id])
     comments = db.relationship("Comment", order_by="Comment.created_at")
@@ -182,7 +211,12 @@ class Ticket(db.Model):
 
     @property
     def number(self):
-        return f"CHG-{self.id:04d}"
+        return f"{self.section.prefix if self.section else 'CHG'}-{self.id:04d}"
+
+    @property
+    def status_label(self):
+        """Status as shown to people: a section may call "Closed" e.g. "Fulfilled" or "Resolved"."""
+        return self.section.closed_label if self.status == "Closed" and self.section and self.section.closed_label else self.status
 
     @property
     def open_priority_requests(self):

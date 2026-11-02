@@ -97,11 +97,11 @@ def test_home_lives_at_slash_home_and_slash_still_works(mail):
 
 def test_form_link_survives_otp_login(mail):
     c = cmi.app.test_client()
-    assert c.get("/tickets/new?form=INFRA_CHANGE").location == "/login"
+    assert c.get("/tickets/new?form=ACCESS_REQUEST").location == "/login"
     post(c, "/login/otp/send", email="req@corp.com")
     code = re.search(r"\b(\d{6})\b", mail[-1][2]).group(1)
-    assert post(c, "/login/otp/verify", code=code).location == "/tickets/new?form=INFRA_CHANGE"
-    assert c.get("/tickets/new?form=INFRA_CHANGE").status_code == 200
+    assert post(c, "/login/otp/verify", code=code).location == "/tickets/new?form=ACCESS_REQUEST"
+    assert c.get("/tickets/new?form=ACCESS_REQUEST").status_code == 200
     c.get("/logout")
     assert post(c, "/login/core", email="admin@cmi.local", password="pw-test-123").location == "/home"  # used once
 
@@ -420,6 +420,57 @@ def test_admin_soft_deletes_a_request(mail):
     assert "Remove me" not in admin.get("/tickets?tab=all&export=csv").get_data(as_text=True)
     with cmi.app.app_context():
         assert ticket(gone).deleted_at and ticket(gone).title == "Remove me"  # still in the database
+
+
+# ---------------------------------------------------------------- sections (home page tiles)
+
+ACCESS = {"title": "VPN access", "subcategory": "VPN", "system": "Corp VPN", "justification": "Remote work"}
+
+
+def test_end_users_see_requests_and_incidents_but_not_change_management(mail):
+    req = requester(mail)
+    home = req.get("/home").get_data(as_text=True)
+    assert "<h2>IT Requests</h2>" in home and "<h2>IT Incidents</h2>" in home and "<h2>Change Management</h2>" not in home
+    assert "Normal Change" not in req.get("/tickets/new").get_data(as_text=True)  # catalogue hides it too
+    assert req.get("/tickets/new?form=NORMAL_CHANGE").status_code == 403
+    assert post(req, "/tickets/new?form=NORMAL_CHANGE", title="x").status_code == 403  # not just hidden: refused
+    core_home = login("engineer@cmi.local").get("/home").get_data(as_text=True)
+    assert all(f"<h2>{s}</h2>" in core_home for s in ("IT Requests", "IT Incidents", "Change Management"))
+
+
+def test_ticket_numbered_and_closed_by_section(mail):
+    req = requester(mail)
+    tid = create(req, form="ACCESS_REQUEST", **ACCESS)
+    page = req.get(f"/tickets/{tid}").get_data(as_text=True)
+    assert f"REQ-{tid:04d}" in page
+    admin = login("admin@cmi.local")
+    assert f"REQ-{tid:04d}" in admin.get(f"/tickets?tab=all&q=REQ-{tid:04d}").get_data(as_text=True)
+    post(admin, f"/tickets/{tid}/status", status="Closed", rv=rv(tid))
+    assert ">Fulfilled<" in admin.get(f"/tickets/{tid}").get_data(as_text=True)
+    with cmi.app.app_context():
+        assert ticket(tid).status == "Closed"  # the label is display only; filters and reports still see Closed
+
+
+def test_admin_manages_sections(mail):
+    admin = login("admin@cmi.local")
+    assert post(admin, "/admin/sections/new", name="IT Requests", prefix="REQ").status_code == 400  # name taken
+    assert post(admin, "/admin/sections/new", name="Problems", prefix="P1").status_code == 400  # letters only
+    r = post(admin, "/admin/sections/new", name="Problems", prefix="prb", visible_to="core", closed_label="Solved",
+             color="purple", icon="gear", position="4")
+    assert r.status_code == 302
+    with cmi.app.app_context():
+        from models import Form, Section
+        s = Section.query.filter_by(name="Problems").one()
+        assert (s.prefix, s.core_only, s.closed_label) == ("PRB", True, "Solved")
+        sid, fid = s.id, Form.query.filter_by(key="OTHER_INCIDENT").one().id
+    page = admin.get(f"/admin/forms/{fid}").get_data(as_text=True)
+    assert "Problems (core users only)" in page
+    fields = [("f_" + k, v) for k, v in {"id": "description", "label": "What happened?", "type": "textarea"}.items()]
+    admin.post(f"/admin/forms/{fid}", data=MultiDict([("_csrf", "test-token"), ("name", "Other Incident"),
+                                                       ("section_id", str(sid)), ("action", "save"), *fields]))
+    assert "Other Incident" not in requester(mail).get("/home").get_data(as_text=True)  # now core users only
+    assert post(admin, f"/admin/sections/{sid}", action="delete").status_code == 302
+    assert "Move this section" in admin.get(f"/admin/sections/{sid}").get_data(as_text=True)  # still has a form
 
 
 # ---------------------------------------------------------------- export & backup

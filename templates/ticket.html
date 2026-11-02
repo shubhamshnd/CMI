@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% from "_macros.html" import status, priority %}
 {% block title %}{{ t.number }}{% endblock %}
-{% block shell %}Change Request{% endblock %}
+{% block shell %}Ticket{% endblock %}
 {% block body %}
 {% set can_assign = g.user.can('ticket.assign') %}
 {% set can_edit = g.user.can('ticket.edit') %}
 {% set can_link = g.user.can('ticket.link') %}
 {% set show_work = can_assign or can_set_priority or can_edit or can_submit %}
 <div class="obj-header">
-  <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> / <a href="{{ url_for('tickets') }}">Change Requests</a> / {{ t.number }}</div>
+  <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> / <a href="{{ url_for('tickets') }}">Tickets</a> / {{ t.number }}</div>
   <div class="obj-title">
     <div>
       <h1>{{ t.title }}</h1>
@@ -16,7 +16,7 @@
     </div>
     <div class="actions">
       {% if can_edit_values %}<a class="btn" href="{{ url_for('ticket_edit', tid=t.id) }}">Edit</a>{% endif %}
-      {% if g.user.can('ticket.create') and not t.form_version.form.archived and not t.form_version.form.deleted_at and t.form_version.form.latest %}
+      {% if g.user.can('ticket.create') and t.form_version.form.visible_to(g.user) and not t.form_version.form.archived and not t.form_version.form.deleted_at and t.form_version.form.latest %}
       <a class="btn transparent" href="{{ url_for('ticket_new', form=t.form_version.form.key, **{'from': t.id, 'link': 'follow_up_to'}) }}">Create Follow-up</a>
       <a class="btn transparent" href="{{ url_for('ticket_new', form=t.form_version.form.key, **{'from': t.id, 'link': 'child_of'}) }}">Create Child</a>
       {% endif %}
@@ -28,7 +28,7 @@
     </div>
   </div>
   <dl class="kv">
-    <div><dt>Status</dt><dd>{{ status(t.status) }}</dd></div>
+    <div><dt>Status</dt><dd>{{ status(t.status, t.status_label) }}</dd></div>
     <div><dt>Priority</dt><dd>{{ priority(t.priority) }}
       {% for r in t.open_priority_requests %}<span class="sub muted">Requested from {{ r.requested_to.name }}</span>{% endfor %}</dd></div>
     <div><dt>Requester</dt><dd>{{ t.requester.name }}</dd></div>
@@ -196,7 +196,7 @@
           <tr>
             <td>{{ label }}</td>
             <td>{% if can_view(other) %}<a href="{{ url_for('ticket_detail', tid=other.id) }}">{{ other.number }}</a> · {{ other.title }}{% else %}{{ other.number }}{% endif %}</td>
-            <td>{{ status(other.status) }}</td>
+            <td>{{ status(other.status, other.status_label) }}</td>
             {% if can_link %}<td class="right">
               <form method="post" action="{{ url_for('ticket_unlink', tid=t.id, lid=lk.id) }}">
                 <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn transparent" type="submit">Remove</button>
@@ -211,7 +211,7 @@
       <input type="hidden" name="_csrf" value="{{ csrf }}">
       <div><label for="kind">This request is</label>
         <select id="kind" name="kind">{% for k, labels in LINK_KINDS.items() %}<option value="{{ k }}">{{ labels[0] }}</option>{% endfor %}</select></div>
-      <div><label for="number">Request number</label><input id="number" name="number" placeholder="CHG-0001" required></div>
+      <div><label for="number">Request number</label><input id="number" name="number" placeholder="INC-0001" required></div>
       <button class="btn" type="submit">Add Link</button>
     </form>
     {% endif %}

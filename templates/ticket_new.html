@@ -7,22 +7,27 @@
   {% if not fv %}
   <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> / Form Catalogue</div>
   <h1 class="title">Form Catalogue</h1>
-  <p class="subtitle">Choose the type of change you want to request.</p>
-  <div class="panel table-wrap">
+  <p class="subtitle">Choose what you need.</p>
+  {% for s, forms in tiles %}
+  <div class="panel table-wrap spaced">
+    <div class="table-toolbar"><h3>{{ s.name if s else 'Other Requests' }}</h3></div>
     <table>
       <thead><tr><th>Form</th><th>Description</th><th>Version</th></tr></thead>
       <tbody>
         {% for f in forms %}
         <tr><td><a href="{{ url_for('ticket_new', form=f.key) }}">{{ f.name }}</a></td><td>{{ f.description }}</td><td>v{{ f.latest.version }}</td></tr>
-        {% else %}<tr><td colspan="3" class="empty">No published forms yet.</td></tr>{% endfor %}
+        {% endfor %}
       </tbody>
     </table>
   </div>
+  {% else %}
+  <div class="panel pad empty">No published forms yet.</div>
+  {% endfor %}
 
   {% else %}
   <div class="breadcrumb"><a href="{{ url_for('home') }}">Home</a> /
     {% if editing %}<a href="{{ url_for('ticket_detail', tid=editing.id) }}">{{ editing.number }}</a> / Edit
-    {% else %}<a href="{{ url_for('ticket_new') }}">Form Catalogue</a> / {{ form.name }}{% endif %}</div>
+    {% else %}<a href="{{ url_for('ticket_new') }}">Form Catalogue</a> /{% if form.section %} {{ form.section.name }} /{% endif %} {{ form.name }}{% endif %}</div>
   <h1 class="title">{{ 'Edit ' ~ editing.number if editing else form.name }}</h1>
   <p class="subtitle">{{ form.name }} · version {{ fv.version }}
     {% if source %} · {{ LINK_KINDS[kind][0] if kind else 'Copied from' }} <a href="{{ url_for('ticket_detail', tid=source.id) }}">{{ source.number }}</a>; fields with the same name were carried forward{% endif %}</p>

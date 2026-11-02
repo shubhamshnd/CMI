@@ -5,18 +5,20 @@ import secrets
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 from statistics import mean
+from types import SimpleNamespace
 
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
 from werkzeug.security import generate_password_hash
 
 from core import EVENTS, FILE_TYPES, MIN_PASSWORD, need
-from models import (FIELD_TYPES, PERMISSIONS, Form, FormVersion, PermissionProfile, Ticket, TicketApproval, User, db,
-                    utcnow)
+from models import (FIELD_TYPES, PERMISSIONS, SECTION_COLORS, SECTION_ICONS, Form, FormVersion, PermissionProfile,
+                    Section, Ticket, TicketApproval, User, db, utcnow)
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 FIELD_ID = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 FORM_KEY = re.compile(r"^[A-Z][A-Z0-9_]{1,59}$")
+PREFIX = re.compile(r"^[A-Z]{2,5}$")
 BUILDER_KEYS = ["id", "label", "type", "required", "material", "options", "min", "max", "max_length", "accept",
                 "max_mb", "max_count", "show_field", "show_value"]
 
@@ -86,7 +88,19 @@ def validate_schema(fields):
 def forms():
     need("form.publish")
     usage = Counter(fid for (fid,) in db.session.query(FormVersion.form_id).join(Ticket, Ticket.form_version_id == FormVersion.id).filter(Ticket.deleted_at.is_(None)))
-    return render_template("admin_forms.html", forms=Form.live().order_by(Form.archived, Form.name).all(), usage=usage)
+    forms = sorted(Form.live(), key=lambda f: (f.archived, f.section.position if f.section else 1e9, f.section_id or 0,
+                                                f.position, f.name))
+    return render_template("admin_forms.html", forms=forms, usage=usage, sections=all_sections())
+
+
+def all_sections():
+    return Section.query.order_by(Section.position, Section.name).all()
+
+
+def chosen_section():
+    """Section picked in a form's settings: an existing id, or None for "no section"."""
+    sid = request.form.get("section_id", type=int)
+    return db.session.get(Section, sid) if sid else None
 
 
 @bp.post("/forms/new")
@@ -101,7 +115,8 @@ def form_new():
     elif not name:
         flash("Name is required.", "error")
     else:
-        f = Form(key=key, name=name, description=request.form.get("description", "").strip()[:255], draft={"fields": []})
+        f = Form(key=key, name=name, description=request.form.get("description", "").strip()[:255], draft={"fields": []},
+                 section=chosen_section())
         db.session.add(f)
         db.session.commit()
         return redirect(url_for("admin.form_edit", fid=f.id))
@@ -122,8 +137,10 @@ def form_edit(fid):
         if errors:
             for e in errors:
                 flash(e, "error")
-            return render_template("admin_form_edit.html", form=form, fields=fields, name=name), 400
+            return render_template("admin_form_edit.html", form=form, fields=fields, name=name, sections=all_sections()), 400
         form.name, form.description = name, request.form.get("description", "").strip()[:255]
+        form.section = chosen_section()  # takes effect at once (new tickets only); not part of the published version
+        form.position = request.form.get("position", type=int) or 0
         form.draft = {"fields": fields}
         action = request.form.get("action")
         if action == "publish":
@@ -140,7 +157,7 @@ def form_edit(fid):
         if action == "preview":
             return redirect(url_for("admin.form_preview", fid=form.id))
         return redirect(url_for("admin.form_edit", fid=form.id))
-    return render_template("admin_form_edit.html", form=form, fields=fields, name=form.name)
+    return render_template("admin_form_edit.html", form=form, fields=fields, name=form.name, sections=all_sections())
 
 
 @bp.get("/forms/<int:fid>/preview")
@@ -162,7 +179,8 @@ def form_duplicate(fid):
     while Form.query.filter_by(key=key if n == 1 else f"{key}{n}").first():
         n += 1
     f = Form(key=key if n == 1 else f"{key}{n}", name=f"Copy of {src.name}"[:120], description=src.description,
-             draft=copy.deepcopy(src.draft), workflow=copy.deepcopy(src.workflow), default_assignee_id=src.default_assignee_id)
+             draft=copy.deepcopy(src.draft), workflow=copy.deepcopy(src.workflow), default_assignee_id=src.default_assignee_id,
+             section_id=src.section_id)
     db.session.add(f)
     db.session.commit()
     flash(f"Created {f.key} as an unpublished draft.", "success")
@@ -266,6 +284,59 @@ def form_workflow(fid):
     names = {u.id: u.email for u in User.query}
     return render_template("admin_workflow.html", form=form, stages=stages, schema_fields=schema_fields,
                            approvers=approvers, core_users=core_users, names=names)
+
+
+# ---------------------------------------------------------------- sections
+
+@bp.get("/sections")
+def sections():
+    need("form.publish")
+    return render_template("admin_sections.html", sections=all_sections())
+
+
+@bp.route("/sections/new", methods=["GET", "POST"])
+@bp.route("/sections/<int:sid>", methods=["GET", "POST"])
+def section_edit(sid=None):
+    """A home page tile: its look, who may see it, and what its tickets are numbered and closed as."""
+    need("form.publish")
+    s = (db.session.get(Section, sid) or abort(404)) if sid else Section(color="blue", icon="doc", position=len(all_sections()) + 1)
+    if request.method == "POST":
+        if request.form.get("action") == "delete":
+            if s.forms:
+                flash("Move this section's forms to another section before deleting it.", "error")
+                return redirect(url_for("admin.section_edit", sid=s.id))
+            if Ticket.query.filter_by(section_id=s.id).first():
+                flash("Tickets were raised in this section, so it cannot be deleted. Hide it by removing its forms.", "error")
+                return redirect(url_for("admin.section_edit", sid=s.id))
+            db.session.delete(s)
+            db.session.commit()
+            flash("Section deleted.", "success")
+            return redirect(url_for("admin.sections"))
+        v = dict(name=request.form.get("name", "").strip()[:80],
+                 description=request.form.get("description", "").strip()[:255],
+                 prefix=request.form.get("prefix", "").strip().upper(),
+                 color=request.form.get("color") if request.form.get("color") in SECTION_COLORS else "blue",
+                 icon=request.form.get("icon") if request.form.get("icon") in SECTION_ICONS else "doc",
+                 position=request.form.get("position", type=int) or 0,
+                 core_only=request.form.get("visible_to") == "core",
+                 closed_label=request.form.get("closed_label", "").strip()[:30])
+        errors = []
+        if not v["name"] or Section.query.filter(Section.name == v["name"], Section.id != (s.id or 0)).first():
+            errors.append("Enter a section name that is not already in use.")
+        if not PREFIX.match(v["prefix"]):
+            errors.append("Ticket prefix must be 2–5 letters, e.g. REQ.")
+        if errors:  # re-show what was typed without touching the stored section
+            for e in errors:
+                flash(e, "error")
+            return render_template("admin_section_edit.html", s=SimpleNamespace(id=s.id, **v),
+                                   COLORS=SECTION_COLORS, ICONS=SECTION_ICONS), 400
+        for k, val in v.items():
+            setattr(s, k, val)
+        db.session.add(s)
+        db.session.commit()
+        flash(f"Saved {s.name}.", "success")
+        return redirect(url_for("admin.sections"))
+    return render_template("admin_section_edit.html", s=s, COLORS=SECTION_COLORS, ICONS=SECTION_ICONS)
 
 
 # ---------------------------------------------------------------- users & profiles
@@ -421,6 +492,7 @@ def reports():
         "Average approval round (hours)": round(mean(approval_hours), 1) if approval_hours else "—",
     }
     groups = {
+        "Open by section": Counter(t.section.name if t.section else "No section" for t in open_),
         "Open by form": Counter(t.form_version.form.name for t in open_),
         "Open by priority": Counter(t.priority or "Not set" for t in open_),
         "Open by assignee": Counter(t.assignee.name if t.assignee else "Unassigned" for t in open_),

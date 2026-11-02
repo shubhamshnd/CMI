@@ -9,6 +9,7 @@ import csv
 import io
 import logging
 import os
+import re
 import secrets
 import shutil
 import sqlite3
@@ -33,8 +34,8 @@ from core import (MANUAL_STATUSES, MIN_PASSWORD, PRIORITY_CLASS, STATUS_CLASS, I
                   set_status,
                   show_value, store_upload, validate)
 from models import (LINK_KINDS, PERMISSIONS, PRIORITIES, STATUSES, Attachment, Comment, Form, FormVersion,
-                    OtpChallenge, PermissionProfile, PriorityRequest, Ticket, TicketApproval, TicketLink, User, db,
-                    utcnow)
+                    OtpChallenge, PermissionProfile, PriorityRequest, Section, Ticket, TicketApproval, TicketLink, User,
+                    db, utcnow)
 from workflow import current_stage, decide, pending_for, start_approval
 
 OTP_TTL = timedelta(minutes=5)
@@ -286,9 +287,12 @@ def link(t, anchor=None):
     return url_for("ticket_detail", tid=t.id, _external=True, _anchor=anchor)
 
 
+TICKET_NUMBER = re.compile(r"^(?:[A-Z]{1,5}-)?(\d+)$")  # REQ-0012, INC-7, CHG-0003 or just 12
+
+
 def parse_number(text):
-    text = (text or "").strip().upper().removeprefix("CHG-")
-    return int(text) if text.isdigit() else None
+    m = TICKET_NUMBER.match((text or "").strip().upper())
+    return int(m.group(1)) if m else None
 
 
 def awaiting_my_approval(u):
@@ -297,9 +301,32 @@ def awaiting_my_approval(u):
     return [t for t in candidates if pending_for(u, t)]
 
 
+OPEN = Ticket.status.notin_(["Closed", "Rejected"])
+
+
+def tiles(u):
+    """[(section or None, forms)]: the published forms this user may raise, grouped by section in home-page order.
+    Sections hidden from the user (core users only) and sections without forms are left out; unsectioned forms come last."""
+    forms = [f for f in Form.live().filter_by(archived=False).order_by(Form.position, Form.name)
+             if f.latest and f.visible_to(u)]
+    groups = [(s, [f for f in forms if f.section_id == s.id])
+              for s in Section.query.order_by(Section.position, Section.name) if s.visible_to(u)]
+    other = [f for f in forms if not f.section_id]
+    return [(s, fs) for s, fs in groups if fs] + ([(None, other)] if other else [])
+
+
+def section_open(u, section):
+    """Open tickets in a section: everyone's for people who can view all tickets, otherwise the user's own."""
+    q = Ticket.live().filter(OPEN, Ticket.section_id == (section.id if section else None))
+    return q.count() if u.can("ticket.view") else q.filter(Ticket.requester_id == u.id).count()
+
+
 def counts(u):
     return dict(
         mine=Ticket.live().filter_by(requester_id=u.id).count(),
+        mine_open=Ticket.live().filter(Ticket.requester_id == u.id, OPEN).count(),
+        mine_pending=Ticket.live().filter_by(requester_id=u.id, status="Pending Approval").count(),
+        overdue=Ticket.live().filter(Ticket.due_date < date.today(), OPEN).count() if u.can("ticket.view") else None,
         assigned=Ticket.live().filter(Ticket.assignee_id == u.id, Ticket.status != "Closed").count(),
         priority=PriorityRequest.query.join(Ticket).filter(PriorityRequest.requested_to_id == u.id,
                                                            PriorityRequest.status == "open", Ticket.deleted_at.is_(None)).count(),
@@ -318,8 +345,9 @@ def csv_cell(v):
 @app.get("/")
 @app.get("/home")  # registered first, so url_for("home") builds /home: the site's nginx redirects a bare "/" to /login
 def home():
-    forms = Form.live().filter_by(archived=False).order_by(Form.name).all()
-    return render_template("home.html", counts=counts(g.user), forms=[f for f in forms if f.latest])
+    groups = tiles(g.user)
+    return render_template("home.html", counts=counts(g.user), tiles=groups,
+                           open_counts={s.id if s else None: section_open(g.user, s) for s, _ in groups})
 
 
 TABS = {"mine": "Mine", "assigned": "Assigned to Me", "priority": "Priority Requests",
@@ -343,10 +371,14 @@ def tickets():
     elif tab == "approvals":
         q = q.filter(Ticket.id.in_([t.id for t in awaiting_my_approval(u)]))
     text = args.get("q", "").strip()
-    if parse_number(text) and text.upper().startswith("CHG-"):
+    if "-" in text and parse_number(text):  # a ticket number like REQ-0012; plain words and digits search titles
         q = q.filter(Ticket.id == parse_number(text))
     elif text:
         q = q.filter(Ticket.title.ilike(f"%{text}%"))
+    if args.get("section"):
+        q = q.filter(Ticket.section_id.is_(None) if args["section"] == "none" else Ticket.section_id == args.get("section", type=int))
+    if args.get("open"):
+        q = q.filter(OPEN)
     if args.get("status"):
         q = q.filter(Ticket.status == args["status"])
     if args.get("priority"):
@@ -359,26 +391,27 @@ def tickets():
     if args.get("export") == "csv":
         out = io.StringIO()
         w = csv.writer(out)
-        w.writerow(["Number", "Title", "Form", "Version", "Status", "Priority", "Requester", "Assignee", "Due",
+        w.writerow(["Number", "Title", "Section", "Form", "Version", "Status", "Priority", "Requester", "Assignee", "Due",
                     "Created (UTC)", "Closed (UTC)"])
         for t in rows:
-            w.writerow([csv_cell(v) for v in (t.number, t.title, t.form_version.form.name, t.form_version.version,
-                                                t.status, t.priority, t.requester.name, t.assignee and t.assignee.name,
-                                                t.due_date, t.created_at, t.closed_at)])
+            w.writerow([csv_cell(v) for v in (t.number, t.title, t.section and t.section.name, t.form_version.form.name,
+                                                t.form_version.version, t.status_label, t.priority, t.requester.name,
+                                                t.assignee and t.assignee.name, t.due_date, t.created_at, t.closed_at)])
         return Response(out.getvalue(), mimetype="text/csv",
                         headers={"Content-Disposition": f"attachment; filename=cmi-{tab}-{date.today()}.csv"})
     tabs = {k: v for k, v in TABS.items() if k != "all" or u.can("ticket.view")}
     return render_template("tickets.html", rows=rows, tab=tab, tabs=tabs, counts=counts(u),
-                           forms=Form.live().order_by(Form.name).all())
+                           forms=[f for f in Form.live().order_by(Form.name) if f.visible_to(u)])
 
 
 @app.route("/tickets/new", methods=["GET", "POST"])
 def ticket_new():
     need("ticket.create")
     form = Form.live().filter_by(key=request.args.get("form", ""), archived=False).first()
+    if form and not form.visible_to(g.user):
+        abort(403)  # e.g. a Change Management form opened by an end user
     if not form or not form.latest:
-        forms = Form.live().filter_by(archived=False).order_by(Form.name).all()
-        return render_template("ticket_new.html", forms=[f for f in forms if f.latest])
+        return render_template("ticket_new.html", tiles=tiles(g.user))
     fv, errors = form.latest, {}
     source = get_ticket(request.args.get("from", type=int)) if request.args.get("from") else None
     kind = request.args.get("link") if source and request.args.get("link") in LINK_KINDS else None
@@ -388,7 +421,7 @@ def ticket_new():
         if not title:
             errors["title"] = "Required"
         if not errors:
-            t = Ticket(title=title[:200], form_version=fv, values={}, requester=g.user,
+            t = Ticket(title=title[:200], form_version=fv, section=form.section, values={}, requester=g.user,
                        assignee=form.default_assignee if form.default_assignee and form.default_assignee.active else None)
             db.session.add(t)
             db.session.flush()
@@ -818,6 +851,99 @@ SEED_FORMS = {
 }
 
 
+def _sub(options, label="Subcategory"):
+    return {"id": "subcategory", "label": label, "type": "select", "required": True, "options": options}
+
+
+_NEEDED_BY = {"id": "needed_by", "label": "Needed By", "type": "date"}
+_JUSTIFICATION = {"id": "justification", "label": "Business Justification", "type": "textarea", "required": True, "max_length": 2000}
+_INCIDENT = [  # every incident form ends with these; impact + can_work feed the priority the service desk sets
+    {"id": "affected", "label": "Who is affected?", "type": "select", "required": True,
+     "options": ["Just me", "My team", "Whole site / many users"]},
+    {"id": "can_work", "label": "Can work continue?", "type": "select", "required": True,
+     "options": ["Yes, with a workaround", "No"]},
+    {"id": "description", "label": "What happened?", "type": "textarea", "required": True, "max_length": 4000},
+    {"id": "screenshot", "label": "Screenshot", "type": "image", "max_count": 3},
+]
+SEED_FORMS.update({
+    # IT Requests
+    "ACCESS_REQUEST": ("Access Request", "VPN, shared folders, applications, email groups", [
+        _sub(["VPN", "Shared folder", "Application access", "Email group", "Other"]),
+        {"id": "system", "label": "System / folder / group name", "type": "text", "required": True, "max_length": 200},
+        {"id": "access_level", "label": "Access Level", "type": "select", "options": ["Read", "Read / Write", "Admin"]},
+        _NEEDED_BY, _JUSTIFICATION]),
+    "SOFTWARE_INSTALL": ("Software Installation", "Install or upgrade software on your machine", [
+        {"id": "software", "label": "Software Name and Version", "type": "text", "required": True, "max_length": 200},
+        {"id": "licence", "label": "Licence", "type": "select", "required": True, "material": True,
+         "options": ["Free / open source", "Licensed (company already has it)", "Licensed (needs purchase)"]},
+        {"id": "machine", "label": "Machine (hostname or asset tag)", "type": "text", "required": True, "max_length": 100},
+        _JUSTIFICATION]),
+    "HARDWARE_REQUEST": ("Hardware Request", "Laptop, monitor, peripherals", [
+        {"id": "item", "label": "Item", "type": "select", "required": True, "material": True,
+         "options": ["Laptop", "Desktop", "Monitor", "Keyboard / Mouse", "Headset", "Printer", "Other"]},
+        {"id": "quantity", "label": "Quantity", "type": "number", "required": True, "min": 1, "max": 50, "material": True},
+        {"id": "replacement", "label": "Replacing faulty or old equipment", "type": "checkbox"},
+        {"id": "old_asset", "label": "Asset tag being replaced", "type": "text", "max_length": 100,
+         "show_if": {"field": "replacement", "equals": "yes"}},
+        _NEEDED_BY, _JUSTIFICATION]),
+    "IT_SERVICE": ("IT Services", "New joiner setup, email ID, backup restore and more", [
+        _sub(["New joiner setup", "Email ID creation", "Backup restore", "Meeting room / AV support", "Other"], "Service"),
+        {"id": "details", "label": "Details", "type": "textarea", "required": True, "max_length": 4000},
+        _NEEDED_BY]),
+    "OTHER_REQUEST": ("Other Request", "Anything not listed above", [
+        {"id": "details", "label": "What do you need?", "type": "textarea", "required": True, "max_length": 4000},
+        {"id": "attachment", "label": "Attachment", "type": "file", "max_count": 3}]),
+    # IT Incidents
+    "IT_ISSUE": ("IT Issue", "Login, email, printer, shared drive", [
+        _sub(["Login / password", "Email", "Printer", "Shared drive", "Other"]), *_INCIDENT]),
+    "NETWORK_ISSUE": ("Network Issue", "Internet, Wi-Fi, VPN, LAN", [
+        _sub(["Internet down", "Wi-Fi", "VPN", "LAN / cable", "Slow network"]),
+        {"id": "location", "label": "Location (building / floor)", "type": "text", "required": True, "max_length": 200},
+        *_INCIDENT]),
+    "SOFTWARE_ISSUE": ("Software Issue", "Application crashes, errors, licence expired", [
+        {"id": "application", "label": "Application", "type": "text", "required": True, "max_length": 200},
+        _sub(["Crash / not opening", "Error message", "Very slow", "Licence expired", "Other"]), *_INCIDENT]),
+    "HARDWARE_ISSUE": ("Hardware Issue", "Laptop, desktop, monitor, printer faults", [
+        _sub(["Laptop", "Desktop", "Monitor", "Printer", "Keyboard / Mouse", "Other"], "Device"),
+        {"id": "asset_tag", "label": "Asset Tag", "type": "text", "max_length": 100}, *_INCIDENT]),
+    "OTHER_INCIDENT": ("Other Incident", "Something else is not working", _INCIDENT),
+    # Change Management
+    "STANDARD_CHANGE": ("Standard Change", "Routine, low-risk, pre-approved changes", [
+        {"id": "task", "label": "Pre-approved Task", "type": "select", "required": True,
+         "options": ["Add user to group", "Patch from approved list", "Certificate renewal", "Other pre-approved task"]},
+        {"id": "systems", "label": "Systems", "type": "text", "required": True, "max_length": 200},
+        {"id": "planned_start", "label": "Planned Start", "type": "datetime", "required": True},
+        {"id": "description", "label": "Description", "type": "textarea", "required": True, "max_length": 4000}]),
+    "NORMAL_CHANGE": ("Normal Change", "Planned change with some risk; needs CAB approval", [
+        {"id": "systems", "label": "Systems Affected", "type": "multi_select", "required": True, "material": True,
+         "options": ["Server", "Network", "Database", "Storage", "Application", "Security"]},
+        {"id": "reason", "label": "Reason and Expected Benefit", "type": "textarea", "required": True, "max_length": 4000},
+        {"id": "risk", "label": "Impact and Risk", "type": "select", "required": True, "material": True, "options": ["Low", "Medium", "High"]},
+        {"id": "downtime", "label": "Downtime required", "type": "checkbox", "material": True},
+        {"id": "downtime_details", "label": "Downtime Details", "type": "text", "required": True, "max_length": 200,
+         "show_if": {"field": "downtime", "equals": "yes"}},
+        {"id": "planned_start", "label": "Planned Start", "type": "datetime", "required": True, "material": True},
+        {"id": "planned_end", "label": "Planned End", "type": "datetime", "required": True, "material": True},
+        {"id": "rollback_plan", "label": "Rollback Plan", "type": "textarea", "required": True, "material": True},
+        {"id": "test_evidence", "label": "Test Evidence", "type": "file", "max_count": 3}]),
+    "EMERGENCY_CHANGE": ("Emergency Change", "Urgent fix to restore service", [
+        {"id": "incident", "label": "Related Incident Number", "type": "text", "max_length": 20},
+        {"id": "systems", "label": "Systems Affected", "type": "multi_select", "required": True, "material": True,
+         "options": ["Server", "Network", "Database", "Storage", "Application", "Security"]},
+        {"id": "reason", "label": "Why it cannot wait", "type": "textarea", "required": True, "max_length": 4000},
+        {"id": "planned_start", "label": "Planned Start", "type": "datetime", "required": True, "material": True},
+        {"id": "rollback_plan", "label": "Rollback Plan", "type": "textarea", "required": True, "material": True}]),
+})
+SEED_SECTIONS = [  # name, prefix, colour, icon, core users only, closed label, description, form keys
+    ("IT Requests", "REQ", "green", "cart", False, "Fulfilled", "Ask for access, software, hardware",
+     ["ACCESS_REQUEST", "SOFTWARE_INSTALL", "HARDWARE_REQUEST", "IT_SERVICE", "OTHER_REQUEST"]),
+    ("IT Incidents", "INC", "red", "alert", False, "Resolved", "Report something that is broken",
+     ["IT_ISSUE", "NETWORK_ISSUE", "SOFTWARE_ISSUE", "HARDWARE_ISSUE", "OTHER_INCIDENT"]),
+    ("Change Management", "CHG", "amber", "cycle", True, "Implemented", "Plan and approve system changes",
+     ["STANDARD_CHANGE", "NORMAL_CHANGE", "EMERGENCY_CHANGE", "INFRA_CHANGE", "FIREWALL_RULE"]),
+]
+
+
 @app.cli.command("seed")
 def seed():
     """Create permission profiles, demo forms with workflows and demo core users (safe to re-run)."""
@@ -842,15 +968,37 @@ def seed():
             {"name": "CAB", "mode": "any", "approvers": [uid["cab@cmi.local"]], "condition": {"field": "risk", "equals": "High"}},
         ],
         "FIREWALL_RULE": [{"name": "Security Review", "mode": "any", "approvers": [uid["lead@cmi.local"]], "condition": None}],
+        "SOFTWARE_INSTALL": [{"name": "IT Head Approval", "mode": "any", "approvers": [uid["lead@cmi.local"]],
+                              "condition": {"field": "licence", "equals": "Licensed (needs purchase)"}}],
+        "HARDWARE_REQUEST": [{"name": "IT Head Approval", "mode": "any", "approvers": [uid["lead@cmi.local"]], "condition": None}],
+        "NORMAL_CHANGE": [
+            {"name": "Technical Review", "mode": "any", "approvers": [uid["lead@cmi.local"]], "condition": None},
+            {"name": "CAB", "mode": "all", "approvers": [uid["cab@cmi.local"]], "condition": None},
+        ],
+        "EMERGENCY_CHANGE": [{"name": "Emergency CAB", "mode": "any", "approvers": [uid["cab@cmi.local"]], "condition": None}],
     }
+    service_desk = {"FIREWALL_RULE", *SEED_SECTIONS[0][7], *SEED_SECTIONS[1][7]}  # land with the assigner by default
     for key, (name, desc, fields) in SEED_FORMS.items():
         if not Form.query.filter_by(key=key).first():
             schema = {"fields": fields}
-            db.session.add(Form(key=key, name=name, description=desc, draft=schema, workflow=workflows[key],
-                                default_assignee_id=uid["assigner@cmi.local"] if key == "FIREWALL_RULE" else None,
+            db.session.add(Form(key=key, name=name, description=desc, draft=schema, workflow=workflows.get(key, []),
+                                default_assignee_id=uid["assigner@cmi.local"] if key in service_desk else None,
                                 versions=[FormVersion(version=1, schema=schema)]))
+    for pos, (name, prefix, color, icon, core_only, closed, desc, keys) in enumerate(SEED_SECTIONS, 1):
+        s = Section.query.filter_by(name=name).first()
+        if not s:
+            s = Section(name=name, prefix=prefix, color=color, icon=icon, position=pos, core_only=core_only,
+                        closed_label=closed, description=desc)
+            db.session.add(s)
+        for f in Form.query.filter(Form.key.in_(keys), Form.section_id.is_(None)):  # never moves a form the admin placed
+            f.section, f.position = s, keys.index(f.key) + 1
+    db.session.flush()
+    # Tickets raised before sections existed join their form's section when that keeps their CHG- number.
+    for t in Ticket.query.filter(Ticket.section_id.is_(None)):
+        if t.form_version.form.section and t.form_version.form.section.prefix == "CHG":
+            t.section = t.form_version.form.section
     db.session.commit()
-    print("Seeded profiles, forms and workflows.")
+    print("Seeded profiles, sections, forms and workflows.")
     if created:
         print(f"Core users {', '.join(created)} created with password: {password}")
 

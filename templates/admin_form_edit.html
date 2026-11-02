@@ -39,6 +39,10 @@
     <div class="panel pad inline-form">
       <div><label for="name" class="req">Name</label><input id="name" name="name" value="{{ name }}" maxlength="120" required></div>
       <div class="grow"><label for="description">Description</label><input id="description" name="description" value="{{ form.description }}" maxlength="255"></div>
+      <div><label for="section_id">Section (home page tile)</label>
+        <select id="section_id" name="section_id"><option value="">None (Other Requests)</option>
+          {% for s in sections %}<option value="{{ s.id }}" {% if s.id == form.section_id %}selected{% endif %}>{{ s.name }}{% if s.core_only %} (core users only){% endif %}</option>{% endfor %}</select></div>
+      <div><label for="position">Order in section</label><input id="position" name="position" type="number" min="0" max="999" value="{{ form.position }}"></div>
     </div>
     <p class="hint">Every request also has a Title. Fields keep their ID across versions; changing an ID creates a new field.</p>
     <div class="rows">{% for f in fields %}{{ row(f) }}{% endfor %}</div>

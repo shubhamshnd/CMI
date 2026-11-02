@@ -1,4 +1,14 @@
-{% macro status(s) %}<span class="status {{ STATUS_CLASS.get(s, 'neutral') }}">{{ s }}</span>{% endmacro %}
+{% macro status(s, label=None) %}<span class="status {{ STATUS_CLASS.get(s, 'neutral') }}">{{ label or s }}</span>{% endmacro %}
+
+{# Section tile icons (SECTION_ICONS in models.py); stroke follows the tile colour. #}
+{% macro icon(name) %}<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">{{ {
+  'cart': '<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.5 12h11.5l2-8H6.2"/>',
+  'alert': '<path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17v.5"/>',
+  'cycle': '<path d="M20 12a8 8 0 0 1-14 5.3M4 12A8 8 0 0 1 18 6.7"/><path d="M18 2.5v4.5h-4.5M6 21.5V17h4.5"/><circle cx="12" cy="12" r="2.5"/>',
+  'doc': '<path d="M14 3H6v18h12V7l-4-4z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>',
+  'gear': '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
+  'users': '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c.8-3.5 3.3-5 7-5s6.2 1.5 7 5"/><circle cx="17" cy="7" r="2.5"/><path d="M17 12.5c2.7 0 4.4 1.5 5 4.5"/>',
+}.get(name, '')|safe }}</svg>{% endmacro %}
 
 {% macro priority(p) %}{% if p %}<span class="status {{ PRIORITY_CLASS[p] }}">{{ p }}</span>{% else %}<span class="muted">Not set</span>{% endif %}{% endmacro %}
 
